@@ -1,0 +1,25 @@
+{
+  "name": "check-backup-files",
+  "severity": "MEDIUM",
+  "detail": "File backup sensitif umum dapat diakses publik.",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/backup.zip",
+      "match_status": [200],
+      "not_match": ["404", "not found"]
+    },
+    {
+      "method": "GET",
+      "path": "/db.sql",
+      "match_status": [200],
+      "not_match": ["404", "not found"]
+    },
+    {
+      "method": "GET",
+      "path": "/.env.bak",
+      "match_status": [200],
+      "not_match": ["404", "not found"]
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Output scan Keris
+keris-report.md
+keris-report.html
+keris-report.json
+reports/
+
+# Config yang mungkin berisi kredensial
+keris.json
+!keris.json.example
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Test runtime
+*.log
