@@ -92,3 +92,64 @@ def fuzz_parameters(base: str, client: KerisHTTP, endpoints: List[str], max_per_
                     debug(f"  fuzz {name}={label} -> status {r.status_code} reflected={reflected}")
                     break  # cukup satu sinyal per parameter
     return findings
+
+
+def fuzz_cmdi_ssti(base: str, client: KerisHTTP, endpoints: List[str]) -> List[Finding]:
+    """Fuzz command injection & SSTI pada parameter query."""
+    from keris.payloads import CMDI_PAYLOADS, CMDI_OUTPUT_MARKERS, SSTI_PAYLOADS, SSTI_MARKERS
+
+    findings = []
+    base_clean = base.rstrip("/")
+    candidates = list(endpoints)
+    if "?" in base:
+        candidates.append(base)
+    for ep in candidates:
+        full = ep if ep.startswith("http") else base_clean + ep
+        if "?" not in full:
+            continue
+        url = urlparse(full)
+        params = dict(parse_qsl(url.query))
+        for name in list(params.keys())[:5]:
+            # CMDI: kirim payload, cek marker output OS (uid=, root:x, dll)
+            for payload in CMDI_PAYLOADS[:6]:
+                new_qs = dict(params)
+                new_qs[name] = payload
+                try:
+                    r = client.get(f"{url.scheme}://{url.netloc}{url.path}?{urlencode(new_qs)}", timeout=15)
+                except Exception:
+                    continue
+                low = r.text.lower()
+                if any(m in low for m in CMDI_OUTPUT_MARKERS):
+                    findings.append(Finding(
+                        "HIGH", "Kemungkinan command injection",
+                        full,
+                        f"Parameter `{name}` dengan payload `{payload}` merefleksikan output "
+                        "perintah (uid/gid). Verifikasi manual.",
+                        f"payload: {payload}",
+                    ))
+                    debug(f"  CMDI sinyal: {name}={payload}")
+                    break
+            # SSTI: cek refleksi hasil evaluasi template
+            for payload in SSTI_PAYLOADS[:6]:
+                new_qs = dict(params)
+                new_qs[name] = payload
+                try:
+                    r = client.get(f"{url.scheme}://{url.netloc}{url.path}?{urlencode(new_qs)}", timeout=15)
+                except Exception:
+                    continue
+                if "49" in r.text and "7*7" in payload and payload in r.text:
+                    # payload direfleksikan mentah = belum dievaluasi
+                    continue
+                # Jinja2 {{7*7}} -> "49" tanpa payload literal
+                if payload in ("{{7*7}}", "${7*7}", "#{7*7}"):
+                    if "49" in r.text and payload not in r.text:
+                        findings.append(Finding(
+                            "HIGH", "Kemungkinan Server-Side Template Injection (SSTI)",
+                            full,
+                            f"Parameter `{name}` dengan payload `{payload}` tampak dievaluasi "
+                            "sebagai template (refleksi 49). Verifikasi manual.",
+                            f"payload: {payload}",
+                        ))
+                        debug(f"  SSTI sinyal: {name}={payload}")
+                        break
+    return findings

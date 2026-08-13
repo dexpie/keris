@@ -143,9 +143,45 @@ SECRET_PATTERNS = {
     "Database URL": r"(?:postgres|mysql|mongodb|redis|amqp)://[^\s\"']+",
 }
 
+# Command injection (OS command) - dipicu oleh error/refleksi output
+CMDI_PAYLOADS = [
+    "; id",            # shell
+    "| id",
+    "& id",
+    "&& id",
+    "`id`",
+    "$(id)",
+    "; whoami",
+    "| whoami",
+    "|| ls",
+    "%0a id",          # newline injection
+    "'; id; '",
+    "ping -c 1 127.0.0.1",  # benign timing
+]
+
+# Indikator output perintah yang berhasil dieksekusi
+CMDI_OUTPUT_MARKERS = [
+    "uid=", "gid=", "groups=", "root:x:0", "uid 0", "linux",
+]
+
+# Server-Side Template Injection (SSTI)
+SSTI_PAYLOADS = [
+    "{{7*7}}",          # Jinja2 / Twig / Django
+    "${7*7}",           # JSP/EL / FreeMarker
+    "#{7*7}",           # Ruby ERB
+    "{{7*'7'}}",        # Jinja2: '7777777'
+    "${7*7}",           # FreeMarker / Velocity
+    "<%= 7*7 %>",       # ERB
+    "{{7*7}}",          # Nunjucks
+]
+
+# Pola refleksi hasil evaluasi SSTI
+SSTI_MARKERS = [
+    "49", "7777777", "7*7", "4957",
+]
+
 # Header keamanan yang dinilai pada recon
-SECURITY_HEADERS = {
-    "Content-Security-Policy": ("CSP", "Pembatasan sumber konten"),
+SECURITY_HEADERS = {    "Content-Security-Policy": ("CSP", "Pembatasan sumber konten"),
     "Strict-Transport-Security": ("HSTS", "Paksa HTTPS"),
     "X-Frame-Options": ("XFO", "Anti clickjacking"),
     "X-Content-Type-Options": ("nosniff", "Cegah MIME sniffing"),

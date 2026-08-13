@@ -40,7 +40,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     common.add_argument("--timeout", type=float, help="Timeout request (detik)")
     common.add_argument("--retries", type=int, help="Jumlah retry koneksi")
     common.add_argument("--delay", type=float, help="Jeda antar request (detik)")
-    common.add_argument("--preset", choices=["fast", "stealth"], help="Preset concurrency: fast (workers 25, delay 0) / stealth (workers 3, delay 1.0)")
+    common.add_argument("--preset", choices=["fast", "stealth", "aggressive"], help="Preset concurrency: fast (workers 25, delay 0) / stealth (workers 3, delay 1.0) / aggressive (workers 50, delay 0, fuzz dalam)")
     common.add_argument("--token", help="Bearer token untuk request terautentikasi")
     common.add_argument("--cookie", help="Cookie header string untuk request terautentikasi")
     common.add_argument("--username", help="Username untuk basic auth")
@@ -66,6 +66,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--fuzz", action="store_true", help="Jalankan fuzzing parameter sederhana")
     ps.add_argument("--platform-checks", action="store_true", help="Jalankan check khusus platform (WordPress, dll)")
     ps.add_argument("--hidden-params", action="store_true", help="Jalankan hidden parameter discovery")
+    ps.add_argument("--hidden-endpoints", action="store_true",
+                    help="Jalankan hidden endpoint discovery (admin/internal/config/backup)")
     ps.add_argument("--waf", action="store_true", help="Deteksi WAF pada target")
     ps.add_argument("--tls-cert", action="store_true", help="Analisis sertifikat TLS")
     ps.add_argument("--buckets", action="store_true", help="Cek bucket cloud terbuka")
@@ -76,6 +78,20 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
+    # --- serangan aktif (khusus berizin, wajib --authorized) ---
+    ps.add_argument("--authorized", action="store_true",
+                    help="KONFIRMASI izin tertulis untuk serangan aktif (exploit/brute/CVE)")
+    ps.add_argument("--exploit", action="store_true",
+                    help="Auto-exploit injection: SQLi boolean/time, CMDI, SSTI, XSS (butuh --authorized)")
+    ps.add_argument("--exploit-types", default="sqli,cmdi,ssti,xss",
+                    help="Jenis exploit (default: sqli,cmdi,ssti,xss)")
+    ps.add_argument("--brute-extended", action="store_true",
+                    help="Brute-force login dengan wordlist extended (butuh --authorized)")
+    ps.add_argument("--username-enum", action="store_true",
+                    help="Deteksi enumerasi username pada form login")
+    ps.add_argument("--exploit-cve", action="store_true",
+                    help="CVE/PoC probe untuk platform terdeteksi (butuh --authorized)")
+    ps.add_argument("--cve-platform", help="Batasi CVE check ke platform tertentu (opsional)")
 
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
@@ -131,6 +147,14 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pb = sub.add_parser("bruteforce", parents=[common], help="Uji kredensial login lemah (form/basic)")
     pb.add_argument("--type", choices=["auto", "form", "basic"], default="auto",
                     help="Jenis auth: auto (deteksi), form, atau basic")
+    pb.add_argument("--extended", action="store_true",
+                    help="Gunakan wordlist kredensial extended (butuh --authorized)")
+    pb.add_argument("--enumerate", action="store_true",
+                    help="Deteksi enumerasi username pada form login")
+    pb.add_argument("--authorized", action="store_true",
+                    help="KONFIRMASI izin tertulis untuk serangan aktif")
+    pb.add_argument("--throttle", type=float, default=0.1,
+                    help="Jeda antar percobaan (detik); 0 = tanpa jeda")
     pb.add_argument("--json-output", help="File output JSON")
     pb.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1")
@@ -183,6 +207,30 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # params (hidden parameter discovery)
     ppa = sub.add_parser("params", parents=[common], help="Hidden parameter discovery")
     ppa.add_argument("--json-output", help="File output JSON")
+
+    # hidden (hidden endpoint discovery)
+    ph = sub.add_parser("hidden", parents=[common],
+                        help="Hidden endpoint discovery: admin/internal/config/backup yang ter-expose")
+    ph.add_argument("--json-output", help="File output JSON")
+    ph.add_argument("--wordlist", help="File tambahan endpoint kustom (satu per baris)")
+
+    # crawl (web crawler + attack surface map)
+    pc = sub.add_parser("crawl", parents=[common], help="Crawl situs & bangun peta attack surface")
+    pc.add_argument("--max-pages", type=int, default=50, help="Maksimum halaman di-crawl")
+    pc.add_argument("--max-depth", type=int, default=3, help="Kedalaman maksimum")
+    pc.add_argument("--json-output", help="File output JSON")
+
+    # graphql (testing)
+    pgq = sub.add_parser("graphql", parents=[common], help="GraphQL testing: introspection, batching, depth abuse")
+    pgq.add_argument("--json-output", help="File output JSON")
+
+    # takeover (subdomain takeover)
+    ptk = sub.add_parser("takeover", parents=[common], help="Deteksi subdomain takeover (CNAME menggantung)")
+    ptk.add_argument("--json-output", help="File output JSON")
+
+    # smuggling (request smuggling)
+    psm = sub.add_parser("smuggling", parents=[common], help="Deteksi HTTP request smuggling (CL.TE/TE.CL)")
+    psm.add_argument("--json-output", help="File output JSON")
 
     # export (curl/burp session dari temuan JSON)
     pex = sub.add_parser("export", help="Export temuan JSON menjadi curl / Burp XML")
@@ -238,7 +286,7 @@ def _merge_config(args) -> tuple:
         val = getattr(args, field, None)
         if val is not None:
             overrides[field] = val
-    # preset concurrency: fast / stealth
+    # preset concurrency: fast / stealth / aggressive
     preset = getattr(args, "preset", None)
     if preset == "fast":
         overrides.setdefault("workers", 25)
@@ -246,6 +294,12 @@ def _merge_config(args) -> tuple:
     elif preset == "stealth":
         overrides.setdefault("workers", 3)
         overrides.setdefault("delay", 1.0)
+    elif preset == "aggressive":
+        overrides.setdefault("workers", 50)
+        overrides.setdefault("delay", 0)
+        # aggressive: aktifkan opsi serangan aktif otomatis bila CLI mengizinkan
+        if getattr(args, "authorized", False):
+            overrides.setdefault("aggressive", True)
     # gabung plugins CLI ke plugins_dir
     return cfg, overrides
 
@@ -451,6 +505,13 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         hp = discover_hidden_params(base, client, endpoints[:20])
         findings.extend(x.to_dict() for x in hp)
 
+    # hidden endpoint discovery (opsional)
+    if getattr(args, "hidden_endpoints", False):
+        from keris.modules.hidden import find_hidden_endpoints
+
+        he = find_hidden_endpoints(base, client)
+        findings.extend(x.to_dict() for x in he)
+
     # cloud bucket check (opsional)
     if getattr(args, "buckets", False):
         from keris.modules import buckets as buckets_module
@@ -464,6 +525,43 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
 
         fuzz_results = fuzz_module.fuzz_parameters(base, client, endpoints[:20])
         findings.extend(f.to_dict() for f in fuzz_results)
+
+    # --- serangan aktif (khusus berizin) ---
+    authorized = getattr(args, "authorized", False) or bool(overrides.get("authorized"))
+    # auto-exploit injection
+    if getattr(args, "exploit", False):
+        from keris.modules.exploit import run_exploit
+
+        types = [t.strip() for t in getattr(args, "exploit_types", "sqli,cmdi,ssti,xss").split(",") if t.strip()]
+        for f in run_exploit(base, client, endpoints[:25], types=types, authorized=authorized):
+            findings.append(f.to_dict())
+            severity(f.severity, f"{f.title}: {f.endpoint}")
+    # brute-force extended + enumerasi username
+    if getattr(args, "brute_extended", False):
+        if not authorized:
+            warn("Lewati brute-force extended: butuh --authorized")
+        else:
+            from keris.modules import brute as brute_module
+
+            from keris.core.config import KerisConfig as _KC
+            login_paths = cfg.login_paths or []
+            bf = brute_module.brute_extended(
+                base, client, login_paths=login_paths,
+                throttle=0.0 if overrides.get("aggressive") else 0.1)
+            findings.extend(x.to_dict() for x in bf)
+    if getattr(args, "username_enum", False):
+        from keris.modules import brute as brute_module
+
+        ue = brute_module.enumerate_usernames(base, client, login_paths=cfg.login_paths or [])
+        findings.extend(x.to_dict() for x in ue)
+    # CVE/PoC probe untuk platform terdeteksi
+    if getattr(args, "exploit_cve", False):
+        from keris.modules.cve import check_cve
+
+        for f in check_cve(base, client, platform=getattr(args, "cve_platform", None),
+                           authorized=authorized):
+            findings.append(f.to_dict())
+            severity(f.severity, f"{f.title}: {f.endpoint}")
 
     # plugin
     if not args.no_plugins:
@@ -774,13 +872,33 @@ def _cmd_bruteforce(args, cfg, overrides) -> int:
 
     targets = _resolve_targets(args)
     all_findings = []
+    authorized = getattr(args, "authorized", False)
+    login_paths = cfg.login_paths or []
+
+    # enumerasi username
+    if getattr(args, "enumerate", False):
+        for target in targets:
+            base = normalize_url(target)
+            client = _make_client(args, cfg, overrides)
+            try:
+                all_findings.extend(brute_module.enumerate_usernames(base, client, login_paths=login_paths))
+            finally:
+                client.close()
+
     for target in targets:
         base = normalize_url(target)
         client = _make_client(args, cfg, overrides)
         try:
             atype = args.type
+            if getattr(args, "extended", False):
+                if not authorized:
+                    warn("Lewati brute-force extended: butuh --authorized")
+                else:
+                    all_findings.extend(brute_module.brute_extended(
+                        base, client, login_paths=login_paths,
+                        throttle=getattr(args, "throttle", 0.1)))
             if atype in ("auto", "form"):
-                all_findings.extend(brute_module.brute_login_form(base, client))
+                all_findings.extend(brute_module.brute_login_form(base, client, login_paths=login_paths))
             if atype in ("auto", "basic") and not all_findings:
                 all_findings.extend(brute_module.brute_login_basic(base, client))
         finally:
@@ -972,6 +1090,111 @@ def _cmd_params(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_hidden(args, cfg, overrides) -> int:
+    from keris.modules.hidden import find_hidden_endpoints
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    extra = []
+    if getattr(args, "wordlist", None) and os.path.exists(args.wordlist):
+        with open(args.wordlist, "r", encoding="utf-8") as f:
+            extra = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(find_hidden_endpoints(base, client, endpoints=extra))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_crawl(args, cfg, overrides) -> int:
+    from keris.modules.crawler import crawl, crawl_findings
+
+    targets = _resolve_targets(args)
+    all_results = []
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            result = crawl(base, client, max_pages=args.max_pages, max_depth=args.max_depth)
+            all_results.append(result)
+            all_findings.extend(crawl_findings(result))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"results": all_results,
+                       "findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_graphql(args, cfg, overrides) -> int:
+    from keris.modules.graphql import check_graphql
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_graphql(base, client))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_takeover(args, cfg, overrides) -> int:
+    from keris.modules.takeover import check_takeover
+    from keris.core.utils import host_from_url
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        host = host_from_url(base).split(":", 1)[0]
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_takeover(host, client))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_smuggling(args, cfg, overrides) -> int:
+    from keris.modules.smuggling import check_smuggling
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_smuggling(base, client))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
 def _cmd_dos(args, cfg, overrides) -> int:
     from keris.modules.dos import run_dos_test
 
@@ -1102,6 +1325,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_waf(args, cfg, overrides)
         if args.command == "params":
             return _cmd_params(args, cfg, overrides)
+        if args.command == "hidden":
+            return _cmd_hidden(args, cfg, overrides)
+        if args.command == "crawl":
+            return _cmd_crawl(args, cfg, overrides)
+        if args.command == "graphql":
+            return _cmd_graphql(args, cfg, overrides)
+        if args.command == "takeover":
+            return _cmd_takeover(args, cfg, overrides)
+        if args.command == "smuggling":
+            return _cmd_smuggling(args, cfg, overrides)
         if args.command == "export":
             return _cmd_export(args, cfg, overrides)
         if args.command == "dashboard":
