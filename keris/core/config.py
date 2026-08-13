@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "password": None,
     "headers": {},
     "plugins_dir": "plugins",
+    "login_paths": ["/login", "/signin", "/auth", "/account/login"],
     "findings": {},
 }
 
@@ -47,6 +48,7 @@ class KerisConfig:
     password: Optional[str] = None
     headers: Dict[str, str] = field(default_factory=dict)
     plugins_dir: str = "plugins"
+    login_paths: List[str] = field(default_factory=list)
     findings: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -68,11 +70,11 @@ class KerisConfig:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-        known = {k for k in DEFAULT_CONFIG}
         merged = {k: data.get(k, v) for k, v in DEFAULT_CONFIG.items()}
         cfg = cls(**{k: v for k, v in merged.items() if k in cls.__dataclass_fields__})
         cfg.findings = data.get("findings", {})
         cfg.plugins_dir = data.get("plugins_dir", cfg.plugins_dir)
+        cfg.login_paths = data.get("login_paths", cfg.login_paths)
         return cfg
 
     def to_dict(self) -> dict:
@@ -98,6 +100,7 @@ def save_example_config(path: str = "keris.json.example") -> str:
         "password": None,
         "headers": {"X-Custom": "value"},
         "plugins_dir": "plugins",
+        "login_paths": ["/login", "/signin", "/auth", "/account/login"],
         "findings": {
             # override nilai minimum severity yang dianggap temuan penting
             "exit_codes": {"critical": 1, "high": 1},

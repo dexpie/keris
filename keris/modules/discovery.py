@@ -105,7 +105,6 @@ def brute_directories(base: str, client: KerisHTTP, max_workers: int = 10) -> Li
     if not wordlist:
         wordlist = SENSITIVE_PATHS
     found = []
-    stop = max_workers
 
     def check(path: str) -> Optional[dict]:
         # coba beberapa varian: path asli, trailing slash, dan query noise untuk mengalahkan
@@ -138,7 +137,6 @@ def brute_directories(base: str, client: KerisHTTP, max_workers: int = 10) -> Li
             res = fut.result()
             if res:
                 found.append(res)
-                tag = "info" if res["status"] in (403, 401) else "warn"
                 debug(f"{res['status']} {res['path']} ({res['size']} B)")
     ok(f"Path sensitif: {len(found)} ditemukan")
     return found

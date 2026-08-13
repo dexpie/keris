@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import requests
 
 from keris.core.http import KerisHTTP
-from keris.core.logger import info, ok, warn, debug, severity
+from keris.core.logger import info, ok, warn, debug
 from keris.core.utils import add_query, extract_urls, host_from_url, normalize_url
 from keris.payloads import SQLI_ERROR, SQLI_TIME, XSS_PAYLOADS, SSRF_TARGETS
 
@@ -263,3 +263,116 @@ def check_auth_bypass(client: KerisHTTP, url: str) -> Optional[Finding]:
             f"size: {len(body)}, content: {stripped[:200]}",
         )
     return None
+
+
+def check_cookie_flags(headers: dict) -> List[Finding]:
+    """Audit flag keamanan cookie (HttpOnly, Secure, SameSite) dari Set-Cookie."""
+    findings = []
+    set_cookies = headers.get("Set-Cookie", "")
+    if not set_cookies:
+        return findings
+    # gabungkan beberapa header Set-Cookie jika requests memisahkannya
+    if isinstance(headers.get("set-cookie"), list):
+        set_cookies = "; ".join(str(x) for x in headers["set-cookie"])
+    for part in set_cookies.split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name = part.split("=", 1)[0].strip()
+        lower = part.lower()
+        issues = []
+        if "httponly" not in lower:
+            issues.append("HttpOnly")
+        if "secure" not in lower:
+            issues.append("Secure")
+        if "samesite" not in lower:
+            issues.append("SameSite")
+        if issues:
+            findings.append(Finding(
+                "LOW", "Cookie tanpa flag keamanan",
+                f"cookie `{name}`",
+                f"Cookie `{name}` kekurangan: {', '.join(issues)}",
+                part[:150],
+            ))
+    return findings
+
+
+def check_tls(client: KerisHTTP, base: str) -> Optional[Finding]:
+    """Periksa minimum TLS/SSL dari respons (informasional)."""
+    try:
+        client.get(base, timeout=15)
+    except requests.RequestException as e:
+        return Finding(
+            "MEDIUM", "TLS/SSL tidak dapat dihubungi",
+            base, f"Handshake gagal: {str(e)[:200]}",
+            str(e)[:200],
+        )
+    scheme = base.split("://", 1)[0]
+    if scheme != "https":
+        return Finding(
+            "LOW", "Koneksi tanpa TLS",
+            base, "Endpoint diakses via HTTP (tidak terenkripsi).",
+            f"scheme: {scheme}",
+        )
+    # HSTS sudah dicek di recon; di sini cukup konfirmasi https aktif
+    return None
+
+
+def check_cors(client: KerisHTTP, url: str, origin: str = "https://evil.example.com") -> Optional[Finding]:
+    """Deteksi CORS misconfiguration: mengizinkan origin asing + kredensial."""
+    try:
+        r = client.get(url, headers={"Origin": origin}, timeout=15)
+    except requests.RequestException:
+        return None
+    acao = r.headers.get("Access-Control-Allow-Origin")
+    if not acao:
+        return None
+    if acao == "*" and "Access-Control-Allow-Credentials" in r.headers:
+        return Finding(
+            "HIGH", "CORS misconfiguration (wildcard + credentials)",
+            url, "`Access-Control-Allow-Origin: *` dikombinasikan dengan `Allow-Credentials`.",
+            f"ACAO: {acao}, credentials present",
+        )
+    if acao == origin:
+        # refleksi origin tanpa validasi -> serangan cross-origin
+        if "Access-Control-Allow-Credentials" in r.headers:
+            return Finding(
+                "MEDIUM", "CORS origin refleksi + credentials",
+                url, "Origin asing direfleksikan tanpa validasi dan kredensial diizinkan.",
+                f"ACAO: {acao} (reflected)",
+            )
+    return None
+
+
+def check_open_redirect(client: KerisHTTP, url: str, param: str) -> Optional[Finding]:
+    """Deteksi open redirect pada parameter redirect (url, next, return, callbackUrl)."""
+    payloads = ["https://evil.example.com", "//evil.example.com", "https://evil.example.com/%2f%2f"]
+    for payload in payloads:
+        try:
+            r = client.get(add_query(url, **{param: payload}), allow_redirects=False, timeout=15)
+        except requests.RequestException:
+            continue
+        loc = r.headers.get("Location", "")
+        if loc and "evil.example.com" in loc:
+            return Finding(
+                "MEDIUM", "Open redirect (terindikasi)",
+                url, f"Parameter `{param}` memicu redirect ke {loc}",
+                f"payload: {payload} -> Location: {loc}",
+            )
+    return None
+
+
+def check_security_txt(client: KerisHTTP, base: str) -> Optional[Finding]:
+    """Cek keberadaan /.well-known/security.txt."""
+    try:
+        r = client.get(base.rstrip("/") + "/.well-known/security.txt", timeout=15)
+    except requests.RequestException:
+        return None
+    if r.status_code == 200 and ("Contact" in r.text or "Policy" in r.text or "Encryption" in r.text):
+        return None  # security.txt ada
+    return Finding(
+        "INFO", "security.txt tidak ada",
+        base.rstrip("/") + "/.well-known/security.txt",
+        "File security.txt tidak ditemukan. Disarankan untuk jalur pelaporan keamanan yang jelas.",
+        f"status: {r.status_code}",
+    )

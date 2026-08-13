@@ -78,12 +78,30 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"user": {"id": uid, "name": "Admin", "email": "admin@demo.local", "secret_key": "SK12345"}}).encode())
             return
 
+        if path == "/login":
+            html = b"""<html><body>
+            <form method="POST" action="/login">
+              <input type="hidden" name="csrf" value="TOKEN123">
+              <input type="text" name="username">
+              <input type="password" name="password">
+              <input type="submit" name="submit" value="Login">
+            </form></body></html>"""
+            self._send(200, html, "text/html")
+            return
+
+        if path == "/dashboard":
+            self._send(200, json.dumps({"protected": True, "user": "demo"}).encode())
+            return
+
         self._send(404, json.dumps({"error": "not found"}).encode())
 
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/auth/login":
             self._send(401, json.dumps({"error": "invalid credentials"}).encode())
+            return
+        if parsed.path == "/login":
+            self._send(302, b"", "text/html")
             return
         self._send(404, json.dumps({"error": "not found"}).encode())
 

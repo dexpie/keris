@@ -1,0 +1,49 @@
+name: Bug Report
+description: Laporkan bug pada Keris (bukan pada target scan)
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Deskripsi
+      description: Jelaskan bug secara singkat dan jelas.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Langkah reproduksi
+      placeholder: |
+        1. Jalankan perintah `keris ...`
+        2. ...
+        3. Lihat error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versi Keris
+      description: Output dari `keris --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Windows, Linux, macOS]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output / log
+      render: shell
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Penggunaan legal
+      description: Saya menggunakan Keris hanya pada target yang saya miliki/berizin.
+      options:
+        - label: Ya
+          required: true

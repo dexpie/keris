@@ -144,11 +144,11 @@ def generate_report(
             lines.append(f"**Detail:** {f.get('detail', '')}")
             lines.append("")
             if f.get("evidence"):
-                lines.append(f"**Bukti:**")
+                lines.append("**Bukti:**")
                 lines.append("")
-                lines.append(f"```")
+                lines.append("```")
                 lines.append(f.get("evidence", "")[:1000])
-                lines.append(f"```")
+                lines.append("```")
                 lines.append("")
 
     # Rekomendasi

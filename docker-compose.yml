@@ -1,0 +1,14 @@
+services:
+  keris:
+    build: .
+    image: keris:latest
+    entrypoint: ["keris"]
+    # contoh penggunaan:
+    #   docker compose run --rm keris scan https://example.com
+    working_dir: /work
+    volumes:
+      - .:/work
+      - keris_cache:/home/keris/.cache
+
+volumes:
+  keris_cache:

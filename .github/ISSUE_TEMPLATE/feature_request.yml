@@ -1,0 +1,34 @@
+name: Feature Request
+description: Usulkan fitur baru untuk Keris
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Deskripsi fitur
+      description: Apa yang ingin Keris lakukan?
+    validations:
+      required: true
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Alasan / use case
+      description: Mengapa fitur ini berguna?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Perilaku yang diharapkan
+      description: Contoh penggunaan CLI / output yang diharapkan.
+    validations:
+      required: true
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Penggunaan legal
+      description: Fitur harus mendukung pengujian keamanan yang legal dan etis.
+      options:
+        - label: Ya
+          required: true

@@ -29,3 +29,11 @@ keris = "keris.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["keris*"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Fokus pada bug nyata (pyflakes) dan error syntax; biarkan style lain longgar.
+select = ["F", "E9"]
+ignore = ["F401"]

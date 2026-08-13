@@ -28,11 +28,17 @@ DIM = "\033[2m"
 
 _lock = threading.Lock()
 _quiet = False
+_color_enabled = True
 
 
 def set_quiet(q: bool) -> None:
     global _quiet
     _quiet = q
+
+
+def disable_color() -> None:
+    global _color_enabled
+    _color_enabled = False
 
 
 def _write(line: str) -> None:
@@ -43,7 +49,7 @@ def _write(line: str) -> None:
 
 
 def _color(text: str, color: str) -> str:
-    if _quiet:
+    if _quiet or not _color_enabled:
         return text
     return f"{color}{text}{RESET}"
 
@@ -78,8 +84,6 @@ def debug(msg: str) -> None:
 
 
 def severity(level: str, msg: str) -> None:
-    colors = {"CRITICAL": RED, "HIGH": RED, "MEDIUM": YELLOW, "LOW": YELLOW, "INFO": BLUE}
-    c = colors.get(level.upper(), RESET)
     _write(f"[{_color(level, BOLD)}] {msg}")
 
 

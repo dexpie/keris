@@ -61,6 +61,20 @@ SSRF_BYPASS_PREFIXES = [
     "[::1]",
 ]
 
+# Parameter redirect yang umum untuk uji open redirect
+REDIRECT_PARAMS = [
+    "url", "next", "return", "returnUrl", "return_url", "redirect",
+    "redirect_url", "redirectUri", "redirect_uri", "callback", "callbackUrl",
+    "callback_url", "dest", "destination", "goto", "target", "continue",
+    "rurl", "jump", "link", "to",
+]
+
+# Parameter yang umumnya menerima URL (kandidat SSRF)
+URL_PARAMS = [
+    "url", "uri", "link", "src", "src_url", "source", "feed", "host",
+    "target", "dest", "destination", "image", "img", "proxy", "load",
+]
+
 # Direktori yang sering memiliki listing / sensitif
 SENSITIVE_PATHS = [
     "/admin",

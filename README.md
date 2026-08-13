@@ -6,6 +6,8 @@
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
+![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Beta-yellow)
 
 Automated black-box security testing: recon → discovery → vulnerability scanning → reporting.
@@ -26,8 +28,10 @@ Keris is a command-line toolkit that automates the workflow of a black-box web p
 | Module | What it does |
 |---|---|
 | `recon` | DNS resolution, security headers audit, technology/stack detection, robots.txt & sitemap |
+| `passive` | Passive recon without touching the target: subdomains via crt.sh (certificate transparency) + whois |
 | `discover` | Extracts `/api/*` endpoints from JS bundles, scans for secrets (API keys, JWTs), brute-forces directories & subdomains |
-| `scan` | Runs the full pipeline plus vulnerability checks: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass |
+| `scan` | Runs the full pipeline plus vulnerability checks: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass, CORS, open redirect, cookie flags, TLS, security.txt |
+| `fuzz` | Lightweight parameter fuzzing (reflection, SQL/LFI/redirect payloads) to flag spots needing manual review |
 | `plugins` | Runs only your custom checks against a target |
 | `init` | Generates an example `keris.json` config file |
 
@@ -74,8 +78,21 @@ python -m keris scan https://app.example.com --cookie "session=abc123"
 # Basic auth
 python -m keris scan https://admin.example.com --username admin --password hunter2
 
+# Auto-login via HTML login form (session is captured for the whole scan)
+python -m keris scan https://app.example.com --login-username admin --login-password hunter2
+
 # Route through Burp/OWASP ZAP
 python -m keris scan https://example.com --proxy http://127.0.0.1:8080
+```
+
+### Passive recon (no traffic to the target)
+
+```bash
+# Subdomains from crt.sh certificate transparency + whois info
+python -m keris passive example.com -o passive.json
+
+# Include passive recon in a full scan
+python -m keris scan https://example.com --passive
 ```
 
 ### Configuration file
@@ -100,7 +117,8 @@ python -m keris init
   "username": null,
   "password": null,
   "headers": { "X-Custom": "value" },
-  "plugins_dir": "plugins"
+  "plugins_dir": "plugins",
+  "login_paths": ["/login", "/signin", "/auth", "/account/login"]
 }
 ```
 
@@ -110,6 +128,19 @@ python -m keris init
 - `--delay SEC` — sleep between HTTP requests to stay under the radar / avoid flooding
 - `--timeout SEC` — per-request timeout (default 20)
 - `--retries N` — connection retries (default 1; **never** retries HTTP 5xx on purpose, so error-based SQLi isn't masked)
+- `--preset fast` — shortcut for `--workers 25 --delay 0`
+- `--preset stealth` — shortcut for `--workers 3 --delay 1.0`
+
+### Output & CI niceties
+
+```bash
+# Version, plain output, everything into one directory
+keris --version
+python -m keris scan https://example.com --no-color --output-dir ./reports
+
+# Parameter fuzzing in a full scan
+python -m keris scan https://example.com --fuzz
+```
 
 ### Plugins: add your own checks
 
@@ -196,24 +227,38 @@ Example GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / discover / plugins / init)
-│   ├── payloads.py        # SQLi, XSS, SSRF payloads + secret patterns + header checklist
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init)
+│   ├── payloads.py        # SQLi, XSS, SSRF payloads + secret patterns + redirect/url params
 │   ├── report.py          # Markdown report generator
 │   ├── report_html.py     # Self-contained HTML report generator
 │   ├── core/
 │   │   ├── http.py        # HTTP client: auth, retry, proxy, delay/throttle
 │   │   ├── config.py      # keris.json loader
-│   │   ├── logger.py      # colored logging (ASCII-safe on Windows)
+│   │   ├── logger.py      # colored logging (ASCII-safe on Windows, --no-color)
 │   │   └── utils.py       # URL/path/regex helpers
 │   ├── modules/
 │   │   ├── recon.py       # DNS, headers, stack detection
+│   │   ├── passive.py     # crt.sh subdomains + whois (no traffic to target)
 │   │   ├── discovery.py   # JS endpoint extraction, secrets, brute-force
-│   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass
+│   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookies
+│   │   ├── fuzz.py        # lightweight parameter fuzzer
 │   │   ├── plugins.py     # plugin engine (Python + JSON)
-│   │   └── auth.py        # auth helpers
+│   │   └── auth.py        # auth helpers + HTML form auto-login
 │   └── data/              # directory & subdomain wordlists
 ├── plugins/               # example plugins
-└── tests/                 # pytest suite + a vulnerable demo server
+├── tests/                 # pytest suite + a vulnerable demo server
+├── Dockerfile             # container image
+└── docker-compose.yml
+```
+
+### Docker
+
+```bash
+docker build -t keris .
+docker run --rm keris scan https://example.com
+
+# with a local output mount
+docker run --rm -v "$PWD:/work" keris scan https://example.com -o /work/report.md
 ```
 
 ### Development
@@ -231,10 +276,12 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 
 - [x] Recon, discovery, scanner, reporting
 - [x] JSON + HTML reports, exit codes, config file, plugins, multi-target
+- [x] Passive recon (crt.sh subdomains + whois)
+- [x] HTML form auto-login, parameter fuzzing, concurrency presets (`--fast`, `--stealth`)
+- [x] New scanners: CORS, open redirect, cookie flags, TLS, security.txt
+- [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
 - [ ] Template engine for site-specific checks (NextAuth, Supabase, WordPress)
-- [ ] Passive subdomain/port enumeration
 - [ ] Rate-limit-aware scan tuning
-- [ ] CLI concurrency presets (`--fast`, `--stealth`)
 
 ### License
 
@@ -253,8 +300,10 @@ Keris adalah toolkit baris-perintah yang mengotomatisasi alur kerja penetration 
 | Modul | Fungsinya |
 |---|---|
 | `recon` | Resolusi DNS, audit security headers, deteksi teknologi/stack, robots.txt & sitemap |
+| `passive` | Recon pasif tanpa menyentuh target: subdomain via crt.sh (certificate transparency) + whois |
 | `discover` | Ekstrak endpoint `/api/*` dari bundle JS, scan secret (API key, JWT), brute-force direktori & subdomain |
-| `scan` | Menjalankan seluruh pipeline + pengecekan kerentanan: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass |
+| `scan` | Menjalankan seluruh pipeline + pengecekan kerentanan: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass, CORS, open redirect, cookie flags, TLS, security.txt |
+| `fuzz` | Fuzzing parameter ringan (refleksi, payload SQL/LFI/redirect) untuk menandai titik yang perlu verifikasi manual |
 | `plugins` | Menjalankan hanya check khusus yang Anda buat terhadap target |
 | `init` | Membuat contoh file konfigurasi `keris.json` |
 
@@ -301,8 +350,21 @@ python -m keris scan https://app.contoh.com --cookie "session=abc123"
 # Basic auth
 python -m keris scan https://admin.contoh.com --username admin --password hunter2
 
+# Auto-login via form HTML (sesi ditangkap untuk seluruh scan)
+python -m keris scan https://app.contoh.com --login-username admin --login-password hunter2
+
 # Lewati Burp/OWASP ZAP
 python -m keris scan https://contoh.com --proxy http://127.0.0.1:8080
+```
+
+### Recon pasif (tanpa lalu lintas ke target)
+
+```bash
+# Subdomain dari crt.sh certificate transparency + info whois
+python -m keris passive contoh.com -o passive.json
+
+# Sertakan recon pasif dalam scan penuh
+python -m keris scan https://contoh.com --passive
 ```
 
 ### File konfigurasi
@@ -327,7 +389,8 @@ python -m keris init
   "username": null,
   "password": null,
   "headers": { "X-Custom": "value" },
-  "plugins_dir": "plugins"
+  "plugins_dir": "plugins",
+  "login_paths": ["/login", "/signin", "/auth", "/account/login"]
 }
 ```
 
@@ -337,6 +400,19 @@ python -m keris init
 - `--delay DETIK` — jeda antar request HTTP agar tidak membebani target
 - `--timeout DETIK` — timeout per request (default 20)
 - `--retries N` — retry koneksi (default 1; **sengaja tidak** me-retry HTTP 5xx, supaya error-based SQLi tidak tertutupi)
+- `--preset fast` — pintasan `--workers 25 --delay 0`
+- `--preset stealth` — pintasan `--workers 3 --delay 1.0`
+
+### Kemudahan output & CI
+
+```bash
+# Versi, output polos, semua laporan dalam satu direktori
+keris --version
+python -m keris scan https://contoh.com --no-color --output-dir ./laporan
+
+# Fuzzing parameter dalam scan penuh
+python -m keris scan https://contoh.com --fuzz
+```
 
 ### Plugin: tambahkan check buatan sendiri
 
@@ -423,24 +499,38 @@ Contoh GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / discover / plugins / init)
-│   ├── payloads.py        # payload SQLi, XSS, SSRF + pola secret + daftar header
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init)
+│   ├── payloads.py        # payload SQLi, XSS, SSRF + pola secret + parameter redirect/url
 │   ├── report.py          # generator laporan markdown
 │   ├── report_html.py     # generator laporan HTML mandiri
 │   ├── core/
 │   │   ├── http.py        # klien HTTP: auth, retry, proxy, delay/throttle
 │   │   ├── config.py      # pemuat keris.json
-│   │   ├── logger.py      # logging berwarna (aman ASCII di Windows)
+│   │   ├── logger.py      # logging berwarna (aman ASCII di Windows, --no-color)
 │   │   └── utils.py       # helper URL/path/regex
 │   ├── modules/
 │   │   ├── recon.py       # DNS, headers, deteksi stack
+│   │   ├── passive.py     # subdomain crt.sh + whois (tanpa trafik ke target)
 │   │   ├── discovery.py   # ekstraksi endpoint JS, secret, brute-force
-│   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass
+│   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookie
+│   │   ├── fuzz.py        # fuzzer parameter ringan
 │   │   ├── plugins.py     # engine plugin (Python + JSON)
-│   │   └── auth.py        # helper auth
+│   │   └── auth.py        # helper auth + auto-login form HTML
 │   └── data/              # wordlist direktori & subdomain
 ├── plugins/               # contoh plugin
-└── tests/                 # suite pytest + server demo rawan
+├── tests/                 # suite pytest + server demo rawan
+├── Dockerfile             # image kontainer
+└── docker-compose.yml
+```
+
+### Docker
+
+```bash
+docker build -t keris .
+docker run --rm keris scan https://contoh.com
+
+# dengan mount direktori output lokal
+docker run --rm -v "$PWD:/work" keris scan https://contoh.com -o /work/laporan.md
 ```
 
 ### Pengembangan
@@ -458,10 +548,12 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 
 - [x] Recon, discovery, scanner, laporan
 - [x] Laporan JSON + HTML, exit codes, config file, plugin, multi-target
+- [x] Recon pasif (subdomain crt.sh + whois)
+- [x] Auto-login form HTML, fuzzing parameter, preset concurrency (`--fast`, `--stealth`)
+- [x] Scanner baru: CORS, open redirect, cookie flags, TLS, security.txt
+- [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
 - [ ] Template engine untuk check khusus platform (NextAuth, Supabase, WordPress)
-- [ ] Enumerasi subdomain/port pasif
 - [ ] Penyetelan scan sadar rate-limit
-- [ ] Preset concurrency CLI (`--fast`, `--stealth`)
 
 ### Lisensi
 

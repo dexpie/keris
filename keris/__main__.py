@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from keris import __version__
 from keris.core.http import KerisHTTP
-from keris.core.logger import info, ok, warn, error, severity, set_quiet
+from keris.core.logger import info, ok, warn, error, debug, severity, set_quiet
 from keris.core.utils import normalize_url
 from keris.core.config import KerisConfig
 from keris.modules import recon as recon_module
@@ -29,6 +29,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
         description="Keris — Modular Web Pentest Toolkit",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    p.add_argument("--version", action="version", version=f"keris {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
@@ -39,12 +40,17 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     common.add_argument("--timeout", type=float, help="Timeout request (detik)")
     common.add_argument("--retries", type=int, help="Jumlah retry koneksi")
     common.add_argument("--delay", type=float, help="Jeda antar request (detik)")
+    common.add_argument("--preset", choices=["fast", "stealth"], help="Preset concurrency: fast (workers 25, delay 0) / stealth (workers 3, delay 1.0)")
     common.add_argument("--token", help="Bearer token untuk request terautentikasi")
     common.add_argument("--cookie", help="Cookie header string untuk request terautentikasi")
     common.add_argument("--username", help="Username untuk basic auth")
     common.add_argument("--password", help="Password untuk basic auth")
+    common.add_argument("--login-username", help="Username untuk auto-login form")
+    common.add_argument("--login-password", help="Password untuk auto-login form")
     common.add_argument("--insecure", action="store_true", help="Nonaktifkan verifikasi TLS")
     common.add_argument("--quiet", action="store_true", help="Minimal output")
+    common.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    common.add_argument("--output-dir", help="Direktori untuk menyimpan semua laporan")
     common.add_argument("--plugins", nargs="*", default=[], help="Plugin tambahan (path .py atau .json)")
 
     # scan (lengkap)
@@ -55,6 +61,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--no-discover", action="store_true", help="Lewati discovery (endpoint/JS)")
     ps.add_argument("--no-bruteforce", action="store_true", help="Lewati brute path/subdomain")
     ps.add_argument("--no-plugins", action="store_true", help="Nonaktifkan plugin")
+    ps.add_argument("--passive", action="store_true", help="Juga lakukan passive recon (crt.sh/whois)")
+    ps.add_argument("--fuzz", action="store_true", help="Jalankan fuzzing parameter sederhana")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
@@ -62,6 +70,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
     pr.add_argument("-o", "--output", help="Simpan hasil recon ke file JSON")
+
+    # passive recon
+    pp = sub.add_parser("passive", parents=[common], help="Passive recon: crt.sh + whois (tanpa menyentuh target)")
+    pp.add_argument("-o", "--output", help="Simpan hasil ke file JSON")
 
     # discover
     pd = sub.add_parser("discover", parents=[common], help="Discovery saja: endpoint API, JS, secret")
@@ -74,9 +86,13 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pi.add_argument("-o", "--output", default="keris.json.example", help="File output")
 
     # plugins (daftar & jalankan plugin)
-    pp = sub.add_parser("plugins", parents=[common], help="Jalankan plugin saja terhadap target")
-    pp.add_argument("--list", action="store_true", help="Daftar plugin yang dimuat")
-    pp.add_argument("--json-output", help="File output JSON")
+    pl = sub.add_parser("plugins", parents=[common], help="Jalankan plugin saja terhadap target")
+    pl.add_argument("--list", action="store_true", help="Daftar plugin yang dimuat")
+    pl.add_argument("--json-output", help="File output JSON")
+
+    # fuzz (jalankan fuzzer parameter saja)
+    pf = sub.add_parser("fuzz", parents=[common], help="Fuzzing parameter sederhana")
+    pf.add_argument("--json-output", help="File output JSON")
 
     return p.parse_args(argv)
 
@@ -102,6 +118,14 @@ def _merge_config(args) -> tuple:
         val = getattr(args, field, None)
         if val is not None:
             overrides[field] = val
+    # preset concurrency: fast / stealth
+    preset = getattr(args, "preset", None)
+    if preset == "fast":
+        overrides.setdefault("workers", 25)
+        overrides.setdefault("delay", 0)
+    elif preset == "stealth":
+        overrides.setdefault("workers", 3)
+        overrides.setdefault("delay", 1.0)
     # gabung plugins CLI ke plugins_dir
     return cfg, overrides
 
@@ -136,6 +160,25 @@ def _get_plugins(args, cfg: KerisConfig) -> List[dict]:
 def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client: KerisHTTP) -> dict:
     findings = []
 
+    # auto-login: ganti client jika user memberi kredensial form login
+    if getattr(args, "login_username", None) and getattr(args, "login_password", None):
+        info("=== AUTO LOGIN ===")
+        from keris.modules import auth as auth_module
+
+        client = auth_module.auto_login(
+            base, args.login_username, args.login_password,
+            login_paths=cfg.login_paths or None,
+            timeout=overrides.get("timeout", cfg.timeout),
+        )
+
+    # passive recon (crt.sh/whois) — opsional, tidak menyentuh target langsung
+    passive = {}
+    if getattr(args, "passive", False):
+        info("=== PASSIVE RECON ===")
+        from keris.modules import passive as passive_module
+
+        passive = passive_module.run_passive_recon(base)
+
     info("=== RECON ===")
     recon = recon_module.run_recon(base, client)
 
@@ -152,6 +195,26 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     info("=== SCANNER ===")
     endpoints = disc.get("api_endpoints", [])[:50]
     base_clean = base.rstrip("/")
+
+    # security headers & cookie flags dari respons utama
+    for f in scanner_module.check_cookie_flags(recon.get("headers", {})):
+        findings.append(f.to_dict())
+        severity("LOW", f"Cookie tanpa flag: {f.endpoint}")
+
+    tls_f = scanner_module.check_tls(client, base)
+    if tls_f:
+        findings.append(tls_f.to_dict())
+        severity(tls_f.severity, tls_f.title)
+
+    cors_f = scanner_module.check_cors(client, base)
+    if cors_f:
+        findings.append(cors_f.to_dict())
+        severity(cors_f.severity, f"CORS: {base}")
+
+    sec_txt = scanner_module.check_security_txt(client, base)
+    if sec_txt:
+        findings.append(sec_txt.to_dict())
+        severity("INFO", "security.txt tidak ada")
 
     for d in disc.get("found_dirs", []):
         if d["status"] == 200:
@@ -175,6 +238,20 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                         findings.append(f.to_dict())
                         severity("MEDIUM", f"XSS potensial pada {ep} ({param})")
 
+    # open redirect pada parameter redirect umum (untuk halaman dengan query)
+    from keris.payloads import REDIRECT_PARAMS
+
+    for ep in endpoints[:15]:
+        full = base + ep
+        if "?" in full:
+            for param in REDIRECT_PARAMS:
+                if param in full:
+                    r = scanner_module.check_open_redirect(client, full, param)
+                    if r:
+                        findings.append(r.to_dict())
+                        severity("MEDIUM", f"Open redirect: {ep} ({param})")
+                    break
+
     for ep in ["/api/auth/login", "/api/auth/register", "/api/login", "/api/forgot-password"]:
         url = base_clean + ep
         f = scanner_module.check_rate_limit(client, url)
@@ -190,19 +267,29 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.append(f.to_dict())
             severity("HIGH", f"Auth bypass: {base}{ap}")
 
+    # fuzzing parameter sederhana (opsional)
+    if getattr(args, "fuzz", False):
+        from keris.modules import fuzz as fuzz_module
+
+        fuzz_results = fuzz_module.fuzz_parameters(base, client, endpoints[:20])
+        findings.extend(f.to_dict() for f in fuzz_results)
+
     # plugin
     if not args.no_plugins:
         info("=== PLUGINS ===")
         plugins = _get_plugins(args, cfg)
         if plugins:
-            ctx = {"recon": recon, "discovery": disc}
+            ctx = {"recon": recon, "discovery": disc, "passive": passive}
             plugin_findings = plugins_module.run_plugins(plugins, client, base, ctx)
             findings.extend(f.to_dict() for f in plugin_findings)
         else:
             debug("Tidak ada plugin ditemukan")
 
     ok(f"Scan selesai: {len(findings)} temuan")
-    return {"recon": recon, "discovery": disc, "findings": findings}
+    result = {"recon": recon, "discovery": disc, "findings": findings}
+    if passive:
+        result["passive"] = passive
+    return result
 
 
 def _write_outputs(base, result, args, options, cfg) -> None:
@@ -305,6 +392,45 @@ def _cmd_recon(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_passive(args, cfg, overrides) -> int:
+    from keris.modules import passive as passive_module
+
+    targets = _resolve_targets(args)
+    all_results = {}
+    for target in targets:
+        base = normalize_url(target)
+        info(f"\n===== TARGET: {target} =====")
+        result = passive_module.run_passive_recon(base)
+        all_results[base] = result
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(all_results if len(targets) > 1 else next(iter(all_results.values())),
+                      f, indent=2, default=str)
+        ok(f"Hasil passive recon disimpan: {args.output}")
+    return EXIT_OK
+
+
+def _cmd_fuzz(args, cfg, overrides) -> int:
+    from keris.modules import fuzz as fuzz_module
+
+    targets = _resolve_targets(args)
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
+            info(f"Fuzz {len(disc.get('api_endpoints', []))} endpoint...")
+            findings = fuzz_module.fuzz_parameters(base, client, disc.get("api_endpoints", []))
+        finally:
+            client.close()
+        ok(f"Fuzz selesai: {len(findings)} sinyal perlu verifikasi manual")
+        if args.json_output:
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"target": base, "findings": [x.to_dict() for x in findings]}, f, indent=2)
+            ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
 def _cmd_discover(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     for target in targets:
@@ -357,17 +483,35 @@ def _cmd_plugins(args, cfg, overrides) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     cfg, overrides = _merge_config(args)
+
+    if getattr(args, "no_color", False):
+        from keris.core import logger as logger_mod
+
+        logger_mod.disable_color()
     set_quiet(getattr(args, "quiet", False) or overrides.get("quiet", False))
+
+    # output-dir: semua laporan ditulis ke direktori tersebut
+    if getattr(args, "output_dir", None):
+        os.makedirs(args.output_dir, exist_ok=True)
+        _join_output = lambda p: os.path.join(args.output_dir, os.path.basename(p))
+        for attr in ("output", "json_output", "html_output"):
+            val = getattr(args, attr, None)
+            if val:
+                setattr(args, attr, _join_output(val))
 
     try:
         if args.command == "recon":
             return _cmd_recon(args, cfg, overrides)
+        if args.command == "passive":
+            return _cmd_passive(args, cfg, overrides)
         if args.command == "discover":
             return _cmd_discover(args, cfg, overrides)
         if args.command == "scan":
             return _cmd_scan(args, cfg, overrides)
         if args.command == "plugins":
             return _cmd_plugins(args, cfg, overrides)
+        if args.command == "fuzz":
+            return _cmd_fuzz(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

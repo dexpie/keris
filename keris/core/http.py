@@ -111,7 +111,7 @@ class KerisHTTP:
                 method, url, headers=h, data=data, json=json,
                 allow_redirects=allow_redirects, stream=stream, **kwargs
             )
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             raise
         self.last_request = resp.request
         return resp
