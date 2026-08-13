@@ -75,6 +75,20 @@ URL_PARAMS = [
     "target", "dest", "destination", "image", "img", "proxy", "load",
 ]
 
+# Parameter tersembunyi yang sering mengubah perilaku (debug/admin/test)
+HIDDEN_PARAMS = [
+    "debug", "test", "admin", "administrator", "backup", "restore", "reset",
+    "callback", "webhook", "internal", "source", "trace", "verbose", "dry_run",
+    "bypass", "override", "force", "check", "validate", "preview", "sandbox",
+    "type", "mode", "env", "environment", "key", "password", "token", "secret",
+    "access", "action", "method", "format", "export", "download", "template",
+    "view", "page", "limit", "offset", "order", "sort", "fields", "include",
+    "filter", "query", "search", "role", "permission", "flag", "feature",
+]
+
+# Nilai uji untuk hidden param discovery
+HIDDEN_PARAM_VALUES = ["1", "true", "debug", "admin", "test", "enabled"]
+
 # Direktori yang sering memiliki listing / sensitif
 SENSITIVE_PATHS = [
     "/admin",

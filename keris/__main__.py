@@ -65,6 +65,13 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--passive", action="store_true", help="Juga lakukan passive recon (crt.sh/whois)")
     ps.add_argument("--fuzz", action="store_true", help="Jalankan fuzzing parameter sederhana")
     ps.add_argument("--platform-checks", action="store_true", help="Jalankan check khusus platform (WordPress, dll)")
+    ps.add_argument("--hidden-params", action="store_true", help="Jalankan hidden parameter discovery")
+    ps.add_argument("--waf", action="store_true", help="Deteksi WAF pada target")
+    ps.add_argument("--tls-cert", action="store_true", help="Analisis sertifikat TLS")
+    ps.add_argument("--buckets", action="store_true", help="Cek bucket cloud terbuka")
+    ps.add_argument("--webhook", help="URL webhook untuk notifikasi temuan HIGH/CRITICAL")
+    ps.add_argument("--webhook-type", choices=["auto", "slack", "discord", "telegram"], default="auto",
+                    help="Jenis webhook (default: auto-detect dari URL)")
     ps.add_argument("--ssrf-callback", help="URL kolaborator (interactsh/Burp) untuk konfirmasi SSRF")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
@@ -142,6 +149,54 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ppr.add_argument("--json-output", help="File output JSON (ramah untuk agent AI)")
     ppr.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     ppr.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # wayback (URL historis archive.org)
+    pw = sub.add_parser("wayback", help="Ambil URL historis dari archive.org (Wayback CDX)")
+    pw.add_argument("domain", help="Domain untuk dicari historisnya")
+    pw.add_argument("--limit", type=int, default=200, help="Maksimum URL diambil")
+    pw.add_argument("--json-output", help="File output JSON")
+    pw.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pw.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # dns (DNS & email security check)
+    pdns = sub.add_parser("dns", help="DNS check: MX, SPF, DMARC, DKIM, TXT + subdomain resolve")
+    pdns.add_argument("domain", help="Domain untuk diperiksa")
+    pdns.add_argument("--subdomains", help="File subdomain (satu per baris) untuk di-resolve")
+    pdns.add_argument("--json-output", help="File output JSON")
+    pdns.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pdns.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # buckets (cloud bucket checker)
+    pbk = sub.add_parser("buckets", parents=[common], help="Cek bucket S3/GCS/Azure terbuka")
+    pbk.add_argument("--name", help="Nama bucket spesifik (default: turunan dari target)")
+    pbk.add_argument("--json-output", help="File output JSON")
+
+    # tls (sertifikat & protokol)
+    ptls = sub.add_parser("tls", parents=[common], help="Analisis sertifikat TLS & protokol lemah")
+    ptls.add_argument("--port", type=int, default=443, help="Port TLS (default 443)")
+    ptls.add_argument("--json-output", help="File output JSON")
+
+    # waf (deteksi firewall aplikasi)
+    pwaf = sub.add_parser("waf", parents=[common], help="Deteksi & fingerprint WAF")
+    pwaf.add_argument("--json-output", help="File output JSON")
+
+    # params (hidden parameter discovery)
+    ppa = sub.add_parser("params", parents=[common], help="Hidden parameter discovery")
+    ppa.add_argument("--json-output", help="File output JSON")
+
+    # export (curl/burp session dari temuan JSON)
+    pex = sub.add_parser("export", help="Export temuan JSON menjadi curl / Burp XML")
+    pex.add_argument("json_file", help="File hasil scan (JSON output Keris)")
+    pex.add_argument("--format", choices=["curl", "burp"], default="curl",
+                     help="Format output")
+    pex.add_argument("-o", "--output", help="File output (default: stdout)")
+
+    # dashboard (gabungkan laporan)
+    pdb = sub.add_parser("dashboard", help="Gabungkan beberapa laporan JSON menjadi dashboard HTML")
+    pdb.add_argument("json_files", nargs="+", help="File hasil scan (JSON output Keris)")
+    pdb.add_argument("-o", "--output", default="dashboard.html", help="File output HTML")
+    pdb.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pdb.add_argument("--quiet", action="store_true", help="Minimal output")
 
     return p.parse_args(argv)
 
@@ -347,6 +402,46 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         pf = platforms_module.check_platforms(base, client)
         findings.extend(x.to_dict() for x in pf)
 
+    # WAF detection (opsional)
+    if getattr(args, "waf", False):
+        from keris.modules.waf import detect_waf
+
+        waf = detect_waf(base, client)
+        if waf.get("waf"):
+            findings.append({
+                "severity": "INFO", "title": "WAF terdeteksi",
+                "endpoint": base, "detail": f"Web Application Firewall: {waf['waf']}",
+                "evidence": ", ".join(waf.get("evidence", []))[:500],
+            })
+
+    # TLS certificate analysis (opsional)
+    if getattr(args, "tls_cert", False):
+        from keris.modules.tlscheck import check_tls_cert
+        from keris.core.utils import host_from_url
+
+        tls_host = host_from_url(base).split(":", 1)[0]
+        tls_result = check_tls_cert(tls_host)
+        for sev, issue in tls_result.get("issues", []):
+            findings.append({
+                "severity": sev, "title": "TLS certificate issue",
+                "endpoint": base, "detail": issue,
+                "evidence": json.dumps(tls_result.get("cert", {}), default=str)[:500],
+            })
+
+    # hidden parameter discovery (opsional)
+    if getattr(args, "hidden_params", False):
+        from keris.modules.params import discover_hidden_params
+
+        hp = discover_hidden_params(base, client, endpoints[:20])
+        findings.extend(x.to_dict() for x in hp)
+
+    # cloud bucket check (opsional)
+    if getattr(args, "buckets", False):
+        from keris.modules import buckets as buckets_module
+
+        bf = buckets_module.check_buckets(base, client)
+        findings.extend(x.to_dict() for x in bf)
+
     # fuzzing parameter sederhana (opsional)
     if getattr(args, "fuzz", False):
         from keris.modules import fuzz as fuzz_module
@@ -364,6 +459,17 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.extend(f.to_dict() for f in plugin_findings)
         else:
             debug("Tidak ada plugin ditemukan")
+
+    # webhook notifikasi untuk temuan HIGH/CRITICAL
+    webhook = getattr(args, "webhook", None)
+    if webhook:
+        from keris.modules.notify import notify
+
+        critical = [f for f in findings if f.get("severity", "").upper() in ("HIGH", "CRITICAL")]
+        if critical:
+            notify(webhook, getattr(args, "webhook_type", "auto") or "auto", base, critical)
+        else:
+            debug("Tidak ada temuan HIGH/CRITICAL; webhook dilewati")
 
     ok(f"Scan selesai: {len(findings)} temuan")
     result = {"recon": recon, "discovery": disc, "findings": findings}
@@ -726,6 +832,169 @@ def _cmd_project(args, cfg, overrides) -> int:
     return EXIT_FINDINGS if (result["summary"].get("CRITICAL", 0) or result["summary"].get("HIGH", 0)) else EXIT_OK
 
 
+def _cmd_wayback(args, cfg, overrides) -> int:
+    from keris.modules.wayback import extract_interesting, fetch_wayback_urls
+
+    entries = fetch_wayback_urls(args.domain, limit=args.limit)
+    interesting = extract_interesting(entries)
+    if interesting:
+        ok(f"Endpoint/file menarik: {len(interesting)}")
+        for u in interesting[:40]:
+            print(f"  - {u}")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"domain": args.domain, "entries": entries,
+                       "interesting": interesting}, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_dns(args, cfg, overrides) -> int:
+    from keris.modules.dnscheck import check_dns, resolve_subdomains
+
+    result = check_dns(args.domain)
+    for sev, issue in result.get("issues", []):
+        severity(sev, issue)
+    if getattr(args, "subdomains", None) and os.path.exists(args.subdomains):
+        with open(args.subdomains, "r", encoding="utf-8") as f:
+            subs = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+        active = resolve_subdomains(args.domain, subs)
+        result["active_subdomains"] = active
+        ok(f"Subdomain aktif: {len(active)}/{len(subs)}")
+        for a in active[:40]:
+            print(f"  - {a['subdomain']}.{args.domain} ({a['type']})")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_buckets(args, cfg, overrides) -> int:
+    from keris.modules import buckets as buckets_module
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(buckets_module.check_buckets(base, client, name=args.name))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_tls(args, cfg, overrides) -> int:
+    from keris.modules.tlscheck import check_tls_cert
+    from keris.core.utils import host_from_url
+
+    targets = _resolve_targets(args)
+    all_results = []
+    for target in targets:
+        base = normalize_url(target)
+        netloc = host_from_url(base)
+        host = netloc.split(":", 1)[0]
+        port = args.port
+        result = check_tls_cert(host, port=port)
+        all_results.append(result)
+        for sev, issue in result.get("issues", []):
+            severity(sev, issue)
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(all_results if len(all_results) > 1 else all_results[0], f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_waf(args, cfg, overrides) -> int:
+    from keris.modules.waf import detect_waf
+
+    targets = _resolve_targets(args)
+    all_results = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            result = detect_waf(base, client)
+        finally:
+            client.close()
+        all_results.append(result)
+        if result["waf"]:
+            ok(f"WAF: {result['waf']}")
+        if result["blocked"]:
+            warn("Target tampak memblokir request scan (block page)")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(all_results if len(all_results) > 1 else all_results[0], f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_params(args, cfg, overrides) -> int:
+    from keris.modules.params import discover_hidden_params
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
+            all_findings.extend(discover_hidden_params(base, client, disc.get("api_endpoints", [])))
+        finally:
+            client.close()
+    ok(f"Hidden params selesai: {len(all_findings)} sinyal")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_export(args, cfg, overrides) -> int:
+    from keris.modules.export import export_requests
+
+    with open(args.json_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    findings = data.get("findings", data if isinstance(data, list) else [])
+    target = data.get("target", args.json_file)
+    out = export_requests(findings, args.format, target)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as fh:
+            fh.write(out)
+        ok(f"Export ditulis: {args.output} ({args.format})")
+    else:
+        print(out)
+    return EXIT_OK
+
+
+def _cmd_dashboard(args, cfg, overrides) -> int:
+    from keris.report_dashboard import build_dashboard
+
+    results = []
+    for jf in args.json_files:
+        if not os.path.exists(jf):
+            warn(f"File tidak ditemukan: {jf}")
+            continue
+        with open(jf, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "findings" in data:
+            results.append({"target": data.get("target", jf), "findings": data["findings"]})
+        elif isinstance(data, list):
+            results.append({"target": jf, "findings": data})
+    if not results:
+        error("Tidak ada laporan valid untuk dashboard")
+        return EXIT_ERROR
+    build_dashboard(results, args.output)
+    ok(f"Dashboard ditulis: {args.output} ({len(results)} laporan)")
+    return EXIT_OK
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     cfg, overrides = _merge_config(args)
@@ -770,6 +1039,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_platforms(args, cfg, overrides)
         if args.command == "project":
             return _cmd_project(args, cfg, overrides)
+        if args.command == "wayback":
+            return _cmd_wayback(args, cfg, overrides)
+        if args.command == "dns":
+            return _cmd_dns(args, cfg, overrides)
+        if args.command == "buckets":
+            return _cmd_buckets(args, cfg, overrides)
+        if args.command == "tls":
+            return _cmd_tls(args, cfg, overrides)
+        if args.command == "waf":
+            return _cmd_waf(args, cfg, overrides)
+        if args.command == "params":
+            return _cmd_params(args, cfg, overrides)
+        if args.command == "export":
+            return _cmd_export(args, cfg, overrides)
+        if args.command == "dashboard":
+            return _cmd_dashboard(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

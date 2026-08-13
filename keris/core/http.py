@@ -1,4 +1,4 @@
-"""Klien HTTP dengan dukungan auth (cookie, token, basic), retry, dan proxy."""
+"""Klien HTTP dengan dukungan auth (cookie, token, basic), retry, proxy, dan backoff adaptif."""
 
 import time
 from typing import Optional, Dict, Any
@@ -26,6 +26,8 @@ class KerisHTTP:
         insecure: bool = False,
         delay: float = 0.0,
         extra_headers: Optional[dict] = None,
+        adaptive_backoff: bool = True,
+        max_backoff: float = 30.0,
     ) -> None:
         self.session = requests.Session()
         self.timeout = timeout
@@ -34,9 +36,13 @@ class KerisHTTP:
         self.basic_auth = basic_auth
         self.insecure = insecure
         self.delay = delay
+        self.adaptive_backoff = adaptive_backoff
+        self.max_backoff = max_backoff
         self.last_request: Optional[requests.PreparedRequest] = None
         self._rate_lock = threading.Lock()
         self._last_request_time = 0.0
+        self._backoff = 0.0
+        self._consecutive_blocks = 0
 
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
@@ -109,20 +115,45 @@ class KerisHTTP:
         kwargs.setdefault("verify", not self.insecure)
         try:
             # throttle untuk menghindari overload / deteksi rate limit
-            if self.delay > 0:
-                with self._rate_lock:
-                    wait = self.delay - (time.monotonic() - self._last_request_time)
-                    if wait > 0:
-                        time.sleep(wait)
-                    self._last_request_time = time.monotonic()
+            wait = self.delay
+            with self._rate_lock:
+                if self.delay > 0:
+                    wait = max(wait, self.delay - (time.monotonic() - self._last_request_time))
+                # backoff adaptif bila terkena rate limit/block sebelumnya
+                if self._backoff > 0:
+                    wait = max(wait, self._backoff)
+                    debug(f"Rate-limit backoff aktif: {self._backoff:.1f}s")
+                if wait > 0:
+                    time.sleep(wait)
+                self._last_request_time = time.monotonic()
             resp = self.session.request(
                 method, url, headers=h, data=data, json=json,
                 allow_redirects=allow_redirects, stream=stream, **kwargs
             )
+            self._update_backoff(resp)
         except requests.exceptions.RequestException:
             raise
         self.last_request = resp.request
         return resp
+
+    def _update_backoff(self, resp: requests.Response) -> None:
+        """Naikkan backoff saat 429 atau block page, turunkan saat normal."""
+        if not self.adaptive_backoff:
+            return
+        blocked = resp.status_code in (429, 503) or \
+                  resp.status_code == 403 and "blocked" in resp.text[:500].lower()
+        with self._rate_lock:
+            if blocked:
+                self._consecutive_blocks += 1
+                # exponential: 2s, 4s, 8s ... cap di max_backoff
+                self._backoff = min(self.max_backoff, 2 ** min(self._consecutive_blocks, 5))
+                debug(f"Rate limit terdeteksi (status {resp.status_code}), "
+                      f"backoff -> {self._backoff:.1f}s")
+            else:
+                self._consecutive_blocks = max(0, self._consecutive_blocks - 1)
+                # reset bertahap
+                if self._consecutive_blocks == 0:
+                    self._backoff = max(0.0, self._backoff - 1.0)
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
         return self.request("GET", url, **kwargs)

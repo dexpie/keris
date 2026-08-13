@@ -200,6 +200,108 @@ python -m keris project ./myapp -o audit.md --json-output audit.json
 The JSON output is agent-friendly: each finding has `file`, `line`,
 `severity`, `rule`, `desc`, `snippet`, and `context`.
 
+### Wayback history
+
+Pulls historical URLs from archive.org's CDX API and highlights interesting
+endpoints (old API paths, config files, deleted assets, hidden params):
+
+```bash
+python -m keris wayback example.com --limit 500 --json-output wayback.json
+```
+
+### DNS & email security
+
+Checks A/AAAA/CNAME/MX/TXT/NS/SOA plus SPF, DMARC and common DKIM selectors.
+Optionally resolves a subdomain list and reports which are alive:
+
+```bash
+python -m keris dns example.com --subdomains subs.txt --json-output dns.json
+```
+
+### Cloud bucket checker
+
+Looks for public S3, GCS and Azure Blob buckets derived from the target name:
+
+```bash
+python -m keris buckets example.com --json-output buckets.json
+# or check an explicit name:
+python -m keris buckets example.com --name acme-backup
+# or as part of a full scan:
+python -m keris scan https://example.com --buckets
+```
+
+### TLS certificate analysis
+
+Fetches the leaf certificate (expiry, issuer, SAN, serial) and probes for
+weak protocols (SSLv3, TLSv1, TLSv1.1):
+
+```bash
+python -m keris tls example.com --port 443 --json-output tls.json
+python -m keris scan https://example.com --tls-cert
+```
+
+### WAF detection
+
+Fingerprints common Web Application Firewalls (Cloudflare, AWS WAF, Sucuri,
+Akamai, Imperva, ModSecurity, F5, Barracuda, Fastly, Wordfence, ...) from
+response headers and block-page signatures:
+
+```bash
+python -m keris waf https://example.com --json-output waf.json
+python -m keris scan https://example.com --waf
+```
+
+### Hidden parameter discovery
+
+Probes endpoints with a wordlist of common hidden parameters (`debug`,
+`callback`, `admin`, `test`, ...) and flags responses that change status,
+length or reflect the value:
+
+```bash
+python -m keris params https://example.com --json-output params.json
+python -m keris scan https://example.com --hidden-params
+```
+
+### Export sessions (curl / Burp)
+
+Converts scan findings into replayable `curl` commands or Burp Suite XML
+items, useful to hand the exact requests to a human analyst or other tools:
+
+```bash
+python -m keris scan https://example.com --json-output out.json
+python -m keris export out.json --format curl -o replay.sh
+python -m keris export out.json --format burp -o session.xml
+```
+
+### Webhook notifications
+
+Sends HIGH/CRITICAL findings to Slack, Discord or Telegram after a scan:
+
+```bash
+python -m keris scan https://example.com \
+  --webhook https://hooks.slack.com/services/XXX \
+  --webhook-type slack
+# Discord: --webhook https://discord.com/api/webhooks/...
+# Telegram: --webhook https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID> --webhook-type telegram
+```
+
+### Aggregated dashboard
+
+Combines several JSON scan outputs into a single interactive HTML dashboard
+with per-target tables and severity cards:
+
+```bash
+python -m keris scan https://a.example.com --json-output a.json
+python -m keris scan https://b.example.com --json-output b.json
+python -m keris dashboard a.json b.json -o dashboard.html
+```
+
+### Rate-limit aware scanning
+
+The HTTP client auto-detects 429/403 block responses and applies exponential
+backoff (up to `max_backoff`, default 30 s), so scans stay polite and are
+less likely to get your IP banned mid-assessment.
+
 ### Plugins: add your own checks
 
 Two kinds of plugins are loaded from `plugins_dir` (default `plugins/`):
@@ -285,12 +387,14 @@ Example GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init)
-│   ├── payloads.py        # SQLi, XSS, SSRF payloads + secret patterns + redirect/url params
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard)
+│   ├── payloads.py        # SQLi, XSS, SSRF payloads + secret/redirect/url/hidden params
 │   ├── report.py          # Markdown report generator
 │   ├── report_html.py     # Self-contained HTML report generator
+│   ├── report_pdf.py      # PDF report generator (reportlab)
+│   ├── report_dashboard.py# Aggregated HTML dashboard across targets
 │   ├── core/
-│   │   ├── http.py        # HTTP client: auth, retry, proxy, delay/throttle
+│   │   ├── http.py        # HTTP client: auth, retry, proxy (incl. SOCKS), delay/throttle + adaptive rate-limit backoff
 │   │   ├── config.py      # keris.json loader
 │   │   ├── logger.py      # colored logging (ASCII-safe on Windows, --no-color)
 │   │   └── utils.py       # URL/path/regex helpers
@@ -300,11 +404,19 @@ keris/
 │   │   ├── discovery.py   # JS endpoint extraction, secrets, brute-force
 │   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookies
 │   │   ├── fuzz.py        # lightweight parameter fuzzer
+│   │   ├── params.py      # hidden parameter discovery
 │   │   ├── jwt.py         # JWT decode + weak signature / alg:none / confusion checks
 │   │   ├── portscan.py    # TCP port scanner
 │   │   ├── openapi.py     # OpenAPI/Swagger import
 │   │   ├── brute.py       # weak login credentials (form + basic auth)
 │   │   ├── platforms.py   # platform-specific checks
+│   │   ├── wayback.py     # archive.org CDX history
+│   │   ├── dnscheck.py    # DNS + SPF/DMARC/DKIM + subdomain resolution
+│   │   ├── buckets.py     # public S3/GCS/Azure bucket check
+│   │   ├── tlscheck.py    # TLS certificate & weak protocol analysis
+│   │   ├── waf.py         # WAF fingerprint & block-page detection
+│   │   ├── export.py      # curl / Burp XML session export
+│   │   ├── notify.py      # Slack/Discord/Telegram webhooks
 │   │   ├── project.py     # source-code self-audit (AI-agent friendly)
 │   │   ├── plugins.py     # plugin engine (Python + JSON)
 │   │   └── auth.py        # auth helpers + HTML form auto-login
@@ -537,6 +649,109 @@ python -m keris project ./aplikasi -o audit.md --json-output audit.json
 Output JSON ramah agent: setiap temuan memuat `file`, `line`, `severity`,
 `rule`, `desc`, `snippet`, dan `context`.
 
+### Riwayat Wayback
+
+Ambil URL historis dari CDX API archive.org dan tandai endpoint menarik
+(path API lama, file konfigurasi, aset yang dihapus, parameter tersembunyi):
+
+```bash
+python -m keris wayback contoh.com --limit 500 --json-output wayback.json
+```
+
+### DNS & keamanan email
+
+Periksa A/AAAA/CNAME/MX/TXT/NS/SOA plus SPF, DMARC, dan selector DKIM umum.
+Opsional resolve daftar subdomain dan laporkan mana yang aktif:
+
+```bash
+python -m keris dns contoh.com --subdomains subs.txt --json-output dns.json
+```
+
+### Pengecek bucket cloud
+
+Cari bucket S3, GCS, dan Azure Blob publik yang diturunkan dari nama target:
+
+```bash
+python -m keris buckets contoh.com --json-output buckets.json
+# atau periksa nama eksplisit:
+python -m keris buckets contoh.com --name acme-backup
+# atau bagian dari scan lengkap:
+python -m keris scan https://contoh.com --buckets
+```
+
+### Analisis sertifikat TLS
+
+Ambil sertifikat leaf (masa berlaku, issuer, SAN, serial) dan uji protokol
+lemah (SSLv3, TLSv1, TLSv1.1):
+
+```bash
+python -m keris tls contoh.com --port 443 --json-output tls.json
+python -m keris scan https://contoh.com --tls-cert
+```
+
+### Deteksi WAF
+
+Fingerprint Web Application Firewall umum (Cloudflare, AWS WAF, Sucuri,
+Akamai, Imperva, ModSecurity, F5, Barracuda, Fastly, Wordfence, ...) dari
+header respons dan tanda block page:
+
+```bash
+python -m keris waf https://contoh.com --json-output waf.json
+python -m keris scan https://contoh.com --waf
+```
+
+### Penemuan parameter tersembunyi
+
+Uji endpoint dengan wordlist parameter tersembunyi umum (`debug`, `callback`,
+`admin`, `test`, ...) dan tandai respons yang berubah status, panjang, atau
+merefleksikan nilai:
+
+```bash
+python -m keris params https://contoh.com --json-output params.json
+python -m keris scan https://contoh.com --hidden-params
+```
+
+### Export sesi (curl / Burp)
+
+Konversi temuan scan menjadi perintah `curl` atau item XML Burp Suite yang
+dapat diulang — berguna untuk menyerahkan request persis kepada analis atau
+alat lain:
+
+```bash
+python -m keris scan https://contoh.com --json-output out.json
+python -m keris export out.json --format curl -o replay.sh
+python -m keris export out.json --format burp -o sesi.xml
+```
+
+### Notifikasi webhook
+
+Kirim temuan HIGH/CRITICAL ke Slack, Discord, atau Telegram setelah scan:
+
+```bash
+python -m keris scan https://contoh.com \
+  --webhook https://hooks.slack.com/services/XXX \
+  --webhook-type slack
+# Discord: --webhook https://discord.com/api/webhooks/...
+# Telegram: --webhook https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID> --webhook-type telegram
+```
+
+### Dashboard agregat
+
+Gabungkan beberapa output JSON scan menjadi satu dashboard HTML interaktif
+dengan tabel per-target dan kartu severity:
+
+```bash
+python -m keris scan https://a.contoh.com --json-output a.json
+python -m keris scan https://b.contoh.com --json-output b.json
+python -m keris dashboard a.json b.json -o dashboard.html
+```
+
+### Scan sadar rate-limit
+
+Klien HTTP otomatis mendeteksi respons blokir 429/403 dan menerapkan backoff
+eksponensial (hingga `max_backoff`, default 30 detik) — scan tetap sopan dan
+IP Anda lebih aman dari banned di tengah pengujian.
+
 ### Plugin: tambahkan check buatan sendiri
 
 Dua jenis plugin dimuat dari `plugins_dir` (default `plugins/`):
@@ -622,12 +837,14 @@ Contoh GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init)
-│   ├── payloads.py        # payload SQLi, XSS, SSRF + pola secret + parameter redirect/url
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard)
+│   ├── payloads.py        # payload SQLi, XSS, SSRF + pola secret + parameter redirect/url/hidden
 │   ├── report.py          # generator laporan markdown
 │   ├── report_html.py     # generator laporan HTML mandiri
+│   ├── report_pdf.py      # generator laporan PDF (reportlab)
+│   ├── report_dashboard.py# dashboard HTML agregat antar-target
 │   ├── core/
-│   │   ├── http.py        # klien HTTP: auth, retry, proxy, delay/throttle
+│   │   ├── http.py        # klien HTTP: auth, retry, proxy (termasuk SOCKS), delay/throttle + backoff adaptif rate-limit
 │   │   ├── config.py      # pemuat keris.json
 │   │   ├── logger.py      # logging berwarna (aman ASCII di Windows, --no-color)
 │   │   └── utils.py       # helper URL/path/regex
@@ -637,11 +854,19 @@ keris/
 │   │   ├── discovery.py   # ekstraksi endpoint JS, secret, brute-force
 │   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookie
 │   │   ├── fuzz.py        # fuzzer parameter ringan
+│   │   ├── params.py      # penemuan parameter tersembunyi
 │   │   ├── jwt.py         # decode JWT + cek weak signature / alg:none / confusion
 │   │   ├── portscan.py    # port scanner TCP
 │   │   ├── openapi.py     # import OpenAPI/Swagger
 │   │   ├── brute.py       # kredensial login lemah (form + basic auth)
 │   │   ├── platforms.py   # check khusus platform
+│   │   ├── wayback.py     # riwayat CDX archive.org
+│   │   ├── dnscheck.py    # DNS + SPF/DMARC/DKIM + resolve subdomain
+│   │   ├── buckets.py     # cek bucket S3/GCS/Azure publik
+│   │   ├── tlscheck.py    # analisis sertifikat TLS & protokol lemah
+│   │   ├── waf.py         # fingerprint WAF & deteksi block page
+│   │   ├── export.py      # export sesi curl / Burp XML
+│   │   ├── notify.py      # webhook Slack/Discord/Telegram
 │   │   ├── project.py     # self-audit kode sumber (ramah agent AI)
 │   │   ├── plugins.py     # engine plugin (Python + JSON)
 │   │   └── auth.py        # helper auth + auto-login form HTML
@@ -683,7 +908,9 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 - [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
 - [x] Analisis JWT, port scanning, import OpenAPI, brute-force login lemah, check platform
 - [x] Self-audit proyek (kode sumber, ramah agent AI)
-- [ ] Penyetelan scan sadar rate-limit
+- [x] Riwayat Wayback, DNS & email security, cek bucket cloud, analisis TLS
+- [x] Deteksi WAF, penemuan parameter tersembunyi, export curl/Burp, webhook, dashboard agregat
+- [x] Penyetelan scan sadar rate-limit (backoff adaptif)
 
 ### Lisensi
 
