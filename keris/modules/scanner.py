@@ -8,7 +8,7 @@ import requests
 
 from keris.core.http import KerisHTTP
 from keris.core.logger import info, ok, warn, debug
-from keris.core.utils import add_query, extract_urls, host_from_url, normalize_url
+from keris.core.utils import add_query, extract_urls, host_from_url, normalize_url, set_query_param
 from keris.payloads import SQLI_ERROR, SQLI_TIME, XSS_PAYLOADS, SSRF_TARGETS
 
 FINDING_LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
@@ -126,13 +126,32 @@ def scan_xss(client: KerisHTTP, url: str, param: str) -> List[Finding]:
     return findings
 
 
-def scan_ssrf(client: KerisHTTP, url: str, param: str) -> List[Finding]:
-    """Uji SSRF pada parameter yang menerima URL. Deteksi placeholder vs fetch internal."""
+def scan_ssrf(client: KerisHTTP, url: str, param: str, callback_url: str = "") -> List[Finding]:
+    """Uji SSRF pada parameter yang menerima URL. Deteksi placeholder vs fetch internal.
+
+    - `callback_url`: (opsional) URL kolaborator (mis. interactsh/Burp Collaborator).
+      Jika server target melakukan request balik ke URL ini, SSRF terkonfirmasi.
+    """
     findings = []
-    for target in SSRF_TARGETS:
+    targets = list(SSRF_TARGETS)
+    from keris.payloads import SSRF_BYPASS_PREFIXES
+
+    for prefix in SSRF_BYPASS_PREFIXES:
+        targets.append(f"http://{prefix}/")
+        targets.append(f"https://{prefix}/")
+    if callback_url:
+        targets.insert(0, callback_url)  # callback diuji pertama
+    for target in targets:
         try:
-            r = client.get(add_query(url, **{param: target}), timeout=15)
+            r = client.get(set_query_param(url, param, target), timeout=15)
             body = r.text[:2000]
+            if callback_url and callback_url.split("/")[0] in r.text:
+                findings.append(Finding(
+                    "HIGH", "SSRF terkonfirmasi (callback diterima)",
+                    url, f"Parameter `{param}` melakukan request ke {callback_url}.",
+                    "Callback URL muncul di respons.",
+                ))
+                break
             # tanda placeholder/svg fallback vs konten internal
             placeholder = ("<svg" in body.lower() and "xmlns" in body.lower()) or "not found" in body.lower() or len(body) < 100
             if not placeholder:
@@ -349,7 +368,7 @@ def check_open_redirect(client: KerisHTTP, url: str, param: str) -> Optional[Fin
     payloads = ["https://evil.example.com", "//evil.example.com", "https://evil.example.com/%2f%2f"]
     for payload in payloads:
         try:
-            r = client.get(add_query(url, **{param: payload}), allow_redirects=False, timeout=15)
+            r = client.get(set_query_param(url, param, payload), allow_redirects=False, timeout=15)
         except requests.RequestException:
             continue
         loc = r.headers.get("Location", "")

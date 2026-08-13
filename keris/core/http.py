@@ -40,6 +40,14 @@ class KerisHTTP:
 
         if proxy:
             self.session.proxies = {"http": proxy, "https": proxy}
+            # dukungan SOCKS5 (mis. Tor: socks5h://127.0.0.1:9050)
+            if proxy.lower().startswith("socks"):
+                try:
+                    import socks  # noqa: F401
+                except ImportError:
+                    raise RuntimeError(
+                        "Proxy SOCKS membutuhkan PySocks. Install: pip install PySocks"
+                    )
 
         if insecure:
             import urllib3

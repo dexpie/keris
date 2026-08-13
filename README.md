@@ -32,6 +32,12 @@ Keris is a command-line toolkit that automates the workflow of a black-box web p
 | `discover` | Extracts `/api/*` endpoints from JS bundles, scans for secrets (API keys, JWTs), brute-forces directories & subdomains |
 | `scan` | Runs the full pipeline plus vulnerability checks: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass, CORS, open redirect, cookie flags, TLS, security.txt |
 | `fuzz` | Lightweight parameter fuzzing (reflection, SQL/LFI/redirect payloads) to flag spots needing manual review |
+| `jwt` | Decode JWTs and check for weak signatures, `alg:none`, algorithm confusion, missing expiry |
+| `ports` | Simple TCP port scanner (common ports or a custom list) |
+| `openapi` | Import OpenAPI/Swagger spec and fuzz every documented endpoint |
+| `bruteforce` | Test for weak credentials on HTML login forms or basic auth |
+| `platforms` | Platform-specific checks (WordPress, NextAuth, Supabase, Laravel, phpMyAdmin, Spring) |
+| `project` | Self-audit local source code for vulnerability patterns — CLI-friendly and AI-agent friendly (JSON) |
 | `plugins` | Runs only your custom checks against a target |
 | `init` | Generates an example `keris.json` config file |
 
@@ -140,7 +146,59 @@ python -m keris scan https://example.com --no-color --output-dir ./reports
 
 # Parameter fuzzing in a full scan
 python -m keris scan https://example.com --fuzz
+
+# PDF report (in addition to Markdown/HTML/JSON)
+python -m keris scan https://example.com --pdf report.pdf
 ```
+
+### JWT analysis
+
+```bash
+python -m keris jwt "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature"
+# exit code 1 if weak secret / alg:none / algorithm confusion is found
+```
+
+### Port scanning
+
+```bash
+python -m keris ports example.com                    # common ports
+python -m keris ports example.com --ports 22,80,443 --scan-timeout 3
+```
+
+### OpenAPI / Swagger import
+
+```bash
+python -m keris openapi https://api.example.com --json-output ops.json
+python -m keris openapi https://api.example.com --no-fuzz   # list only
+```
+
+### Weak login credentials
+
+```bash
+python -m keris bruteforce https://app.example.com --type auto
+python -m keris bruteforce https://app.example.com --type basic
+```
+
+### Platform-specific checks
+
+```bash
+python -m keris platforms https://example.com                      # all platforms
+python -m keris platforms https://example.com --names wordpress laravel
+```
+
+### Project self-audit (source code)
+
+Scans a local project for vulnerability patterns. Works standalone or as a
+tool for AI coding agents (Claude Code, Codex, etc.) that need a quick
+security pass before/after changes:
+
+```bash
+python -m keris project ./myapp -o audit.md --json-output audit.json
+# exit code 1 if any CRITICAL/HIGH pattern is found
+```
+
+The JSON output is agent-friendly: each finding has `file`, `line`,
+`severity`, `rule`, `desc`, `snippet`, and `context`.
 
 ### Plugins: add your own checks
 
@@ -242,6 +300,12 @@ keris/
 │   │   ├── discovery.py   # JS endpoint extraction, secrets, brute-force
 │   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookies
 │   │   ├── fuzz.py        # lightweight parameter fuzzer
+│   │   ├── jwt.py         # JWT decode + weak signature / alg:none / confusion checks
+│   │   ├── portscan.py    # TCP port scanner
+│   │   ├── openapi.py     # OpenAPI/Swagger import
+│   │   ├── brute.py       # weak login credentials (form + basic auth)
+│   │   ├── platforms.py   # platform-specific checks
+│   │   ├── project.py     # source-code self-audit (AI-agent friendly)
 │   │   ├── plugins.py     # plugin engine (Python + JSON)
 │   │   └── auth.py        # auth helpers + HTML form auto-login
 │   └── data/              # directory & subdomain wordlists
@@ -280,7 +344,8 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 - [x] HTML form auto-login, parameter fuzzing, concurrency presets (`--fast`, `--stealth`)
 - [x] New scanners: CORS, open redirect, cookie flags, TLS, security.txt
 - [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
-- [ ] Template engine for site-specific checks (NextAuth, Supabase, WordPress)
+- [x] JWT analysis, port scanning, OpenAPI import, weak-login brute-force, platform checks
+- [x] Project self-audit (source code, AI-agent friendly)
 - [ ] Rate-limit-aware scan tuning
 
 ### License
@@ -304,6 +369,12 @@ Keris adalah toolkit baris-perintah yang mengotomatisasi alur kerja penetration 
 | `discover` | Ekstrak endpoint `/api/*` dari bundle JS, scan secret (API key, JWT), brute-force direktori & subdomain |
 | `scan` | Menjalankan seluruh pipeline + pengecekan kerentanan: SQLi, reflected XSS, SSRF, IDOR, rate-limit, directory listing, auth bypass, CORS, open redirect, cookie flags, TLS, security.txt |
 | `fuzz` | Fuzzing parameter ringan (refleksi, payload SQL/LFI/redirect) untuk menandai titik yang perlu verifikasi manual |
+| `jwt` | Decode JWT & cek signature lemah, `alg:none`, algorithm confusion, tanpa expiry |
+| `ports` | Port scanner TCP sederhana (port umum atau daftar custom) |
+| `openapi` | Import spec OpenAPI/Swagger & fuzz semua endpoint yang terdokumentasi |
+| `bruteforce` | Uji kredensial login lemah pada form HTML / basic auth |
+| `platforms` | Check khusus platform (WordPress, NextAuth, Supabase, Laravel, phpMyAdmin, Spring) |
+| `project` | Self-audit kode sumber lokal untuk pola kerentanan — ramah CLI & agent AI (JSON) |
 | `plugins` | Menjalankan hanya check khusus yang Anda buat terhadap target |
 | `init` | Membuat contoh file konfigurasi `keris.json` |
 
@@ -412,7 +483,59 @@ python -m keris scan https://contoh.com --no-color --output-dir ./laporan
 
 # Fuzzing parameter dalam scan penuh
 python -m keris scan https://contoh.com --fuzz
+
+# Laporan PDF (di samping Markdown/HTML/JSON)
+python -m keris scan https://contoh.com --pdf laporan.pdf
 ```
+
+### Analisis JWT
+
+```bash
+python -m keris jwt "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature"
+# exit code 1 jika ada weak secret / alg:none / algorithm confusion
+```
+
+### Port scanning
+
+```bash
+python -m keris ports contoh.com                    # port umum
+python -m keris ports contoh.com --ports 22,80,443 --scan-timeout 3
+```
+
+### Import OpenAPI / Swagger
+
+```bash
+python -m keris openapi https://api.contoh.com --json-output ops.json
+python -m keris openapi https://api.contoh.com --no-fuzz   # list saja
+```
+
+### Kredensial login lemah
+
+```bash
+python -m keris bruteforce https://app.contoh.com --type auto
+python -m keris bruteforce https://app.contoh.com --type basic
+```
+
+### Check khusus platform
+
+```bash
+python -m keris platforms https://contoh.com                      # semua platform
+python -m keris platforms https://contoh.com --names wordpress laravel
+```
+
+### Self-audit proyek (kode sumber)
+
+Scan proyek lokal untuk pola kerentanan. Bisa dipakai mandiri atau sebagai
+alat untuk agent AI (Claude Code, Codex, dll) yang butuh pemeriksaan keamanan
+cepat sebelum/sesudah perubahan:
+
+```bash
+python -m keris project ./aplikasi -o audit.md --json-output audit.json
+# exit code 1 jika ada pola CRITICAL/HIGH
+```
+
+Output JSON ramah agent: setiap temuan memuat `file`, `line`, `severity`,
+`rule`, `desc`, `snippet`, dan `context`.
 
 ### Plugin: tambahkan check buatan sendiri
 
@@ -514,6 +637,12 @@ keris/
 │   │   ├── discovery.py   # ekstraksi endpoint JS, secret, brute-force
 │   │   ├── scanner.py     # SQLi, XSS, SSRF, IDOR, rate-limit, listing, auth bypass, CORS, redirect, TLS, cookie
 │   │   ├── fuzz.py        # fuzzer parameter ringan
+│   │   ├── jwt.py         # decode JWT + cek weak signature / alg:none / confusion
+│   │   ├── portscan.py    # port scanner TCP
+│   │   ├── openapi.py     # import OpenAPI/Swagger
+│   │   ├── brute.py       # kredensial login lemah (form + basic auth)
+│   │   ├── platforms.py   # check khusus platform
+│   │   ├── project.py     # self-audit kode sumber (ramah agent AI)
 │   │   ├── plugins.py     # engine plugin (Python + JSON)
 │   │   └── auth.py        # helper auth + auto-login form HTML
 │   └── data/              # wordlist direktori & subdomain
@@ -552,7 +681,8 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 - [x] Auto-login form HTML, fuzzing parameter, preset concurrency (`--fast`, `--stealth`)
 - [x] Scanner baru: CORS, open redirect, cookie flags, TLS, security.txt
 - [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
-- [ ] Template engine untuk check khusus platform (NextAuth, Supabase, WordPress)
+- [x] Analisis JWT, port scanning, import OpenAPI, brute-force login lemah, check platform
+- [x] Self-audit proyek (kode sumber, ramah agent AI)
 - [ ] Penyetelan scan sadar rate-limit
 
 ### Lisensi

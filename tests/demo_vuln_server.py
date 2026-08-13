@@ -78,6 +78,51 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"user": {"id": uid, "name": "Admin", "email": "admin@demo.local", "secret_key": "SK12345"}}).encode())
             return
 
+        if path == "/openapi.json":
+            spec = {
+                "openapi": "3.0.0",
+                "info": {"title": "Demo API", "version": "1.0"},
+                "paths": {
+                    "/api/users": {
+                        "get": {
+                            "summary": "Get user",
+                            "parameters": [
+                                {"name": "uid", "in": "query", "schema": {"type": "integer"}},
+                            ],
+                            "responses": {"200": {"description": "ok"}},
+                        }
+                    },
+                    "/search": {
+                        "get": {
+                            "summary": "Search",
+                            "parameters": [
+                                {"name": "id", "in": "query", "required": True,
+                                 "schema": {"type": "integer"}},
+                            ],
+                            "responses": {"200": {"description": "ok"}},
+                        }
+                    },
+                },
+            }
+            self._send(200, json.dumps(spec).encode())
+            return
+
+        if path == "/fetch":
+            # SSRF: mengambil URL dari param
+            url = qs.get("url", [""])[0]
+            if url:
+                try:
+                    import urllib.request
+
+                    with urllib.request.urlopen(url, timeout=5) as resp:
+                        data = resp.read(200)
+                    self._send(200, json.dumps({"fetched": data.decode(errors="replace")}).encode())
+                except Exception as e:
+                    self._send(502, json.dumps({"error": str(e)}).encode())
+            else:
+                self._send(400, json.dumps({"error": "url param required"}).encode())
+            return
+
         if path == "/login":
             html = b"""<html><body>
             <form method="POST" action="/login">

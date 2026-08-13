@@ -33,6 +33,19 @@ def add_query(url: str, **params) -> str:
     return urlunparse((p.scheme, p.netloc, p.path, p.params, urlencode(q), p.fragment))
 
 
+def set_query_param(url: str, name: str, value: str) -> str:
+    """Set query param tunggal; aman meskipun nama param == kata kunci fungsi.
+
+    Mengatasi kasus `add_query(url, url=...)` yang error di Python karena
+    argumen `url` bentrok dengan parameter fungsi.
+    """
+    p = urlparse(url)
+    q = dict(parse_qsl(p.query))
+    if value is not None:
+        q[name] = value
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, urlencode(q), p.fragment))
+
+
 def extract_urls(text: str) -> set:
     """Ekstrak URL absolut/relatif dari teks (HTML/JS)."""
     found = set()

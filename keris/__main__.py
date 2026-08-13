@@ -58,11 +58,14 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("-o", "--output", default="keris-report.md", help="File laporan markdown")
     ps.add_argument("--json-output", help="File output JSON (untuk CI)")
     ps.add_argument("--html", dest="html_output", help="File laporan HTML (self-contained)")
+    ps.add_argument("--pdf", dest="pdf_output", help="File laporan PDF")
     ps.add_argument("--no-discover", action="store_true", help="Lewati discovery (endpoint/JS)")
     ps.add_argument("--no-bruteforce", action="store_true", help="Lewati brute path/subdomain")
     ps.add_argument("--no-plugins", action="store_true", help="Nonaktifkan plugin")
     ps.add_argument("--passive", action="store_true", help="Juga lakukan passive recon (crt.sh/whois)")
     ps.add_argument("--fuzz", action="store_true", help="Jalankan fuzzing parameter sederhana")
+    ps.add_argument("--platform-checks", action="store_true", help="Jalankan check khusus platform (WordPress, dll)")
+    ps.add_argument("--ssrf-callback", help="URL kolaborator (interactsh/Burp) untuk konfirmasi SSRF")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
@@ -93,6 +96,52 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # fuzz (jalankan fuzzer parameter saja)
     pf = sub.add_parser("fuzz", parents=[common], help="Fuzzing parameter sederhana")
     pf.add_argument("--json-output", help="File output JSON")
+
+    # jwt (decode & analisis token)
+    pj = sub.add_parser("jwt", help="Decode & analisis keamanan token JWT")
+    pj.add_argument("token", help="Token JWT untuk dianalisis")
+    pj.add_argument("--json-output", help="File output JSON")
+    pj.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pj.add_argument("--quiet", action="store_true", help="Minimal output")
+    pj.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
+    # ports (port scanner)
+    pt = sub.add_parser("ports", parents=[common], help="Port scanner TCP sederhana")
+    pt.add_argument("host", help="Host / IP untuk di-scan")
+    pt.add_argument("--ports", help="Daftar port dipisah koma (mis. 22,80,443). Default: port umum")
+    pt.add_argument("--workers", type=int, default=20, help="Jumlah thread")
+    pt.add_argument("--scan-timeout", type=float, default=2.0, dest="scan_timeout",
+                    help="Timeout koneksi (detik)")
+    pt.add_argument("--json-output", help="File output JSON")
+
+    # openapi (import spec & fuzz endpoint)
+    po = sub.add_parser("openapi", parents=[common], help="Import OpenAPI/Swagger & fuzz endpoint")
+    po.add_argument("--json-output", help="File output JSON")
+    po.add_argument("--no-fuzz", action="store_true", help="Hanya list endpoint, tanpa fuzz")
+
+    # bruteforce (login lemah)
+    pb = sub.add_parser("bruteforce", parents=[common], help="Uji kredensial login lemah (form/basic)")
+    pb.add_argument("--type", choices=["auto", "form", "basic"], default="auto",
+                    help="Jenis auth: auto (deteksi), form, atau basic")
+    pb.add_argument("--json-output", help="File output JSON")
+    pb.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
+    # platforms (check template platform)
+    ppf = sub.add_parser("platforms", parents=[common], help="Check khusus platform (WordPress, NextAuth, dll)")
+    ppf.add_argument("--names", nargs="*", help="Platform yang dicek (default: semua)")
+    ppf.add_argument("--json-output", help="File output JSON")
+    ppf.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
+    # project (self-audit kode lokal)
+    ppr = sub.add_parser("project", help="Self-audit proyek lokal untuk pola kerentanan")
+    ppr.add_argument("path", help="Direktori proyek yang di-scan")
+    ppr.add_argument("-o", "--output", help="File laporan markdown")
+    ppr.add_argument("--json-output", help="File output JSON (ramah untuk agent AI)")
+    ppr.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    ppr.add_argument("--quiet", action="store_true", help="Minimal output")
 
     return p.parse_args(argv)
 
@@ -196,6 +245,19 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     endpoints = disc.get("api_endpoints", [])[:50]
     base_clean = base.rstrip("/")
 
+    # analisis JWT yang ditemukan di bundle JS / halaman
+    from keris.modules.jwt import analyze_jwt, extract_jwts
+
+    jwt_found = set()
+    for sec in disc.get("secrets", []):
+        if sec.get("type", "").lower() in ("jwt", "token"):
+            for tok in extract_jwts(sec.get("match", "")):
+                jwt_found.add(tok)
+    for tok in jwt_found:
+        for f in analyze_jwt(tok):
+            findings.append(f.to_dict())
+            severity(f.severity, f"JWT: {f.title}")
+
     # security headers & cookie flags dari respons utama
     for f in scanner_module.check_cookie_flags(recon.get("headers", {})):
         findings.append(f.to_dict())
@@ -239,17 +301,28 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                         severity("MEDIUM", f"XSS potensial pada {ep} ({param})")
 
     # open redirect pada parameter redirect umum (untuk halaman dengan query)
-    from keris.payloads import REDIRECT_PARAMS
+    from keris.payloads import REDIRECT_PARAMS, URL_PARAMS
 
     for ep in endpoints[:15]:
         full = base + ep
         if "?" in full:
+            from urllib.parse import parse_qsl, urlparse as _up
+
+            qparams = [k for k, _ in parse_qsl(_up(full).query)]
             for param in REDIRECT_PARAMS:
-                if param in full:
+                if param in qparams:
                     r = scanner_module.check_open_redirect(client, full, param)
                     if r:
                         findings.append(r.to_dict())
                         severity("MEDIUM", f"Open redirect: {ep} ({param})")
+                    break
+            # SSRF pada parameter URL umum (only GET)
+            for param in URL_PARAMS:
+                if param in qparams:
+                    callback = getattr(args, "ssrf_callback", "") or ""
+                    for f in scanner_module.scan_ssrf(client, full, param, callback_url=callback):
+                        findings.append(f.to_dict())
+                        severity("HIGH", f"SSRF: {ep} ({param})")
                     break
 
     for ep in ["/api/auth/login", "/api/auth/register", "/api/login", "/api/forgot-password"]:
@@ -266,6 +339,13 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         if f:
             findings.append(f.to_dict())
             severity("HIGH", f"Auth bypass: {base}{ap}")
+
+    # platform checks (opsional, default: nonaktif agar scan tetap cepat)
+    if getattr(args, "platform_checks", False):
+        from keris.modules import platforms as platforms_module
+
+        pf = platforms_module.check_platforms(base, client)
+        findings.extend(x.to_dict() for x in pf)
 
     # fuzzing parameter sederhana (opsional)
     if getattr(args, "fuzz", False):
@@ -299,6 +379,11 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         write_report(recon, disc, findings, args.output, base, options)
     if getattr(args, "html_output", None):
         write_html_report(recon, disc, findings, args.html_output, base, options)
+    if getattr(args, "pdf_output", None):
+        from keris.report_pdf import write_pdf_report
+
+        write_pdf_report(recon, disc, findings, args.pdf_output, base, options)
+        ok(f"PDF output: {args.pdf_output}")
     if getattr(args, "json_output", None):
         payload = {
             "tool": "keris",
@@ -480,6 +565,167 @@ def _cmd_plugins(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_jwt(args, cfg, overrides) -> int:
+    from keris.modules.jwt import analyze_jwt, decode_jwt
+
+    token = args.token
+    decoded = decode_jwt(token)
+    if decoded:
+        info("Header: " + json.dumps(decoded["header"], default=str))
+        info("Payload: " + json.dumps(decoded["payload"], default=str))
+    findings = analyze_jwt(token)
+    for f in findings:
+        severity(f.severity, f"{f.title}: {f.detail}")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"token": token, "findings": [x.to_dict() for x in findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_ports(args, cfg, overrides) -> int:
+    from keris.modules.portscan import scan_ports
+
+    ports = None
+    if getattr(args, "ports", None):
+        try:
+            ports = [int(p.strip()) for p in args.ports.split(",") if p.strip()]
+        except ValueError:
+            raise SystemExit("--ports harus berupa angka dipisah koma")
+    host = args.host
+    if host.lower().startswith("http"):
+        from urllib.parse import urlparse
+
+        host = urlparse(host).hostname or host
+    open_ports = scan_ports(host, ports, workers=args.workers, timeout=args.scan_timeout)
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"host": host, "open_ports": open_ports}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_openapi(args, cfg, overrides) -> int:
+    from keris.modules.openapi import extract_operations, fetch_openapi
+
+    targets = _resolve_targets(args)
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            spec = fetch_openapi(base, client)
+            if not spec:
+                continue
+            ops = extract_operations(spec, base)
+            ok(f"Endpoint dari spec: {len(ops)}")
+            if not args.no_fuzz and ops:
+                from keris.modules import fuzz as fuzz_module
+                from urllib.parse import urlencode
+
+                # bangun URL GET dengan query sample dari spec
+                urls = []
+                for op in ops:
+                    if op["method"] != "get":
+                        continue
+                    q_params = {p["name"]: p["value"] for p in op["params"] if p["in"] == "query"}
+                    target = op["url"]
+                    if q_params:
+                        target += ("&" if "?" in target else "?") + urlencode(q_params)
+                    urls.append(target)
+                info(f"Fuzz {len(urls)} endpoint GET...")
+                findings = fuzz_module.fuzz_parameters(base, client, urls)
+                ok(f"Fuzz selesai: {len(findings)} sinyal perlu verifikasi manual")
+            else:
+                findings = []
+        finally:
+            client.close()
+        if args.json_output:
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"target": base, "operations": ops,
+                           "findings": [x.to_dict() for x in findings]}, f, indent=2)
+            ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_bruteforce(args, cfg, overrides) -> int:
+    from keris.modules import brute as brute_module
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            atype = args.type
+            if atype in ("auto", "form"):
+                all_findings.extend(brute_module.brute_login_form(base, client))
+            if atype in ("auto", "basic") and not all_findings:
+                all_findings.extend(brute_module.brute_login_basic(base, client))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_platforms(args, cfg, overrides) -> int:
+    from keris.modules import platforms as platforms_module
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(platforms_module.check_platforms(base, client,
+                                                                 platforms=args.names))
+        finally:
+            client.close()
+    ok(f"Platform check selesai: {len(all_findings)} temuan")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_project(args, cfg, overrides) -> int:
+    from keris.modules import project as project_module
+
+    result = project_module.scan_project(args.path)
+    findings = result["findings"]
+
+    if args.output:
+        lines = [f"# Keris Project Audit — {result['root']}", ""]
+        lines.append(f"File di-scan: {result['summary']['files_scanned']} · "
+                     f"Total temuan: {result['summary']['total']}")
+        for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            lines.append(f"- {s}: {result['summary'].get(s, 0)}")
+        lines.append("")
+        for f in findings:
+            lines.append(f"## [{f['severity']}] {f['rule']} — {f['file']}:{f['line']}")
+            lines.append("")
+            lines.append(f"**Deskripsi:** {f['desc']}")
+            lines.append("")
+            lines.append("```")
+            lines.append(f['context'])
+            lines.append("```")
+            lines.append("")
+        with open(args.output, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+        ok(f"Laporan ditulis: {args.output}")
+
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as fh:
+            json.dump(result, fh, indent=2)
+        ok(f"JSON output: {args.json_output}")
+
+    # exit code: blokir bila ada critical/high
+    return EXIT_FINDINGS if (result["summary"].get("CRITICAL", 0) or result["summary"].get("HIGH", 0)) else EXIT_OK
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     cfg, overrides = _merge_config(args)
@@ -494,7 +740,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if getattr(args, "output_dir", None):
         os.makedirs(args.output_dir, exist_ok=True)
         _join_output = lambda p: os.path.join(args.output_dir, os.path.basename(p))
-        for attr in ("output", "json_output", "html_output"):
+        for attr in ("output", "json_output", "html_output", "pdf_output"):
             val = getattr(args, attr, None)
             if val:
                 setattr(args, attr, _join_output(val))
@@ -512,6 +758,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_plugins(args, cfg, overrides)
         if args.command == "fuzz":
             return _cmd_fuzz(args, cfg, overrides)
+        if args.command == "jwt":
+            return _cmd_jwt(args, cfg, overrides)
+        if args.command == "ports":
+            return _cmd_ports(args, cfg, overrides)
+        if args.command == "openapi":
+            return _cmd_openapi(args, cfg, overrides)
+        if args.command == "bruteforce":
+            return _cmd_bruteforce(args, cfg, overrides)
+        if args.command == "platforms":
+            return _cmd_platforms(args, cfg, overrides)
+        if args.command == "project":
+            return _cmd_project(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 
