@@ -198,6 +198,22 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pdb.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     pdb.add_argument("--quiet", action="store_true", help="Minimal output")
 
+    # dos (app-layer resilience tester, HANYA dengan izin)
+    pdo = sub.add_parser("dos", parents=[common],
+                         help="Uji ketahanan app-layer (slowloris/slow POST/flood). Wajib --yes dan izin tertulis!")
+    pdo.add_argument("--type", choices=["slowloris", "slowpost", "flood", "all"],
+                     default="all", help="Jenis uji (default: all)")
+    pdo.add_argument("--concurrency", type=int, default=10,
+                     help="Jumlah koneksi/thread bersamaan (default 10)")
+    pdo.add_argument("--duration", type=float, default=20.0,
+                     help="Durasi uji slowloris/slow POST (detik)")
+    pdo.add_argument("--requests", type=int, default=200,
+                     help="Batas total request flood")
+    pdo.add_argument("--port", type=int, help="Port untuk slowloris (default: dari skema URL)")
+    pdo.add_argument("--yes", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk menjalankan beban nyata")
+    pdo.add_argument("--json-output", help="File output JSON")
+
     return p.parse_args(argv)
 
 
@@ -956,6 +972,41 @@ def _cmd_params(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_dos(args, cfg, overrides) -> int:
+    from keris.modules.dos import run_dos_test
+
+    if not getattr(args, "yes", False):
+        from keris.core.logger import error as _error
+
+        _error("Uji DoS membutuhkan konfirmasi izin tertulis. Gunakan --yes.")
+        return EXIT_ERROR
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(run_dos_test(
+                base, client,
+                kind=args.type,
+                concurrency=args.concurrency,
+                duration=args.duration,
+                total=args.requests,
+                port=getattr(args, "port", None),
+                confirmed=True,
+            ))
+        finally:
+            client.close()
+
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    # exit code mengikuti temuan tertinggi (default high)
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
 def _cmd_export(args, cfg, overrides) -> int:
     from keris.modules.export import export_requests
 
@@ -1055,6 +1106,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_export(args, cfg, overrides)
         if args.command == "dashboard":
             return _cmd_dashboard(args, cfg, overrides)
+        if args.command == "dos":
+            return _cmd_dos(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

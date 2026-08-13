@@ -38,6 +38,15 @@ Keris is a command-line toolkit that automates the workflow of a black-box web p
 | `bruteforce` | Test for weak credentials on HTML login forms or basic auth |
 | `platforms` | Platform-specific checks (WordPress, NextAuth, Supabase, Laravel, phpMyAdmin, Spring) |
 | `project` | Self-audit local source code for vulnerability patterns — CLI-friendly and AI-agent friendly (JSON) |
+| `wayback` | Historical URLs from archive.org CDX + interesting endpoint extraction |
+| `dns` | DNS & email security: MX/SPF/DMARC/DKIM/TXT + subdomain resolution |
+| `buckets` | Public cloud bucket check (S3 / GCS / Azure Blob) |
+| `tls` | TLS certificate analysis (expiry, issuer, SAN) + weak protocol probes |
+| `waf` | WAF fingerprinting & block-page detection |
+| `params` | Hidden parameter discovery on endpoints |
+| `export` | Convert findings into replayable `curl` / Burp XML sessions |
+| `dashboard` | Aggregate multiple JSON reports into one HTML dashboard |
+| `dos` | **Authorized only** app-layer resilience test: slowloris / slow POST / measured flood (`--yes` required) |
 | `plugins` | Runs only your custom checks against a target |
 | `init` | Generates an example `keris.json` config file |
 
@@ -302,6 +311,38 @@ The HTTP client auto-detects 429/403 block responses and applies exponential
 backoff (up to `max_backoff`, default 30 s), so scans stay polite and are
 less likely to get your IP banned mid-assessment.
 
+### DoS resilience testing (authorized only)
+
+An **application-layer** resilience tester — the kind of test that appears in
+official pentest scopes when the client asks "can the app survive this?" It is
+deliberately **non-destructive and rate-limited**:
+
+- `slowloris` — holds connections open with partial headers sent slowly
+- `slowpost` — sends request bodies at a very low pace (RUDY style)
+- `flood` — a measured, capped GET load (`--requests`)
+
+Safety rails: low default concurrency, bounded duration, a hard request cap,
+and **`--yes` is mandatory** before any real load is sent. Without `--yes`
+Keris only does a dry-run:
+
+```bash
+# dry-run: refuses to send load without confirmation
+python -m keris dos https://example.com
+
+# authorized test — only against targets you have written permission to test
+python -m keris dos https://example.com --yes \
+  --type slowloris --concurrency 50 --duration 30 \
+  --json-output dos.json
+
+python -m keris dos https://example.com --yes --type flood \
+  --requests 500 --concurrency 20
+```
+
+After the test Keris checks whether the service still answers normal requests
+and reports a `HIGH` finding if it does not. Exit code is non-zero when the
+service went down, which makes this usable as an automated soak/HA check.
+Only run this on targets you own or have explicit written authorization for.
+
 ### Plugins: add your own checks
 
 Two kinds of plugins are loaded from `plugins_dir` (default `plugins/`):
@@ -387,7 +428,7 @@ Example GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard)
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard / dos)
 │   ├── payloads.py        # SQLi, XSS, SSRF payloads + secret/redirect/url/hidden params
 │   ├── report.py          # Markdown report generator
 │   ├── report_html.py     # Self-contained HTML report generator
@@ -417,6 +458,7 @@ keris/
 │   │   ├── waf.py         # WAF fingerprint & block-page detection
 │   │   ├── export.py      # curl / Burp XML session export
 │   │   ├── notify.py      # Slack/Discord/Telegram webhooks
+│   │   ├── dos.py         # app-layer DoS resilience test (authorized-only, --yes)
 │   │   ├── project.py     # source-code self-audit (AI-agent friendly)
 │   │   ├── plugins.py     # plugin engine (Python + JSON)
 │   │   └── auth.py        # auth helpers + HTML form auto-login
@@ -458,7 +500,10 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 - [x] Docker, GitHub Actions CI, SECURITY.md / CONTRIBUTING.md
 - [x] JWT analysis, port scanning, OpenAPI import, weak-login brute-force, platform checks
 - [x] Project self-audit (source code, AI-agent friendly)
-- [ ] Rate-limit-aware scan tuning
+- [x] Wayback history, DNS & email security, cloud bucket check, TLS analysis
+- [x] WAF detection, hidden parameter discovery, curl/Burp export, webhooks, aggregate dashboard
+- [x] Rate-limit-aware scan tuning (adaptive backoff)
+- [x] App-layer DoS resilience test (slowloris / slow POST / measured flood, `--yes` required)
 
 ### License
 
@@ -487,6 +532,15 @@ Keris adalah toolkit baris-perintah yang mengotomatisasi alur kerja penetration 
 | `bruteforce` | Uji kredensial login lemah pada form HTML / basic auth |
 | `platforms` | Check khusus platform (WordPress, NextAuth, Supabase, Laravel, phpMyAdmin, Spring) |
 | `project` | Self-audit kode sumber lokal untuk pola kerentanan — ramah CLI & agent AI (JSON) |
+| `wayback` | URL historis dari CDX archive.org + ekstraksi endpoint menarik |
+| `dns` | DNS & keamanan email: MX/SPF/DMARC/DKIM/TXT + resolve subdomain |
+| `buckets` | Cek bucket cloud publik (S3 / GCS / Azure Blob) |
+| `tls` | Analisis sertifikat TLS (masa berlaku, issuer, SAN) + uji protokol lemah |
+| `waf` | Fingerprint WAF & deteksi block page |
+| `params` | Penemuan parameter tersembunyi pada endpoint |
+| `export` | Konversi temuan menjadi sesi `curl` / Burp XML yang bisa diulang |
+| `dashboard` | Gabungkan banyak laporan JSON menjadi satu dashboard HTML |
+| `dos` | **Khusus berizin** uji ketahanan app-layer: slowloris / slow POST / flood terukur (wajib `--yes`) |
 | `plugins` | Menjalankan hanya check khusus yang Anda buat terhadap target |
 | `init` | Membuat contoh file konfigurasi `keris.json` |
 
@@ -752,6 +806,38 @@ Klien HTTP otomatis mendeteksi respons blokir 429/403 dan menerapkan backoff
 eksponensial (hingga `max_backoff`, default 30 detik) — scan tetap sopan dan
 IP Anda lebih aman dari banned di tengah pengujian.
 
+### Uji ketahanan DoS (khusus berizin)
+
+Penguji ketahanan **lapisan aplikasi** — jenis uji yang muncul di scope
+pentest resmi saat klien bertanya "apakah aplikasi bisa bertahan?". Sengaja
+dibuat **non-destruktif dan terukur**:
+
+- `slowloris` — tahan koneksi terbuka dengan header parsial yang dikirim lambat
+- `slowpost` — kirim body request dengan pace sangat rendah (gaya RUDY)
+- `flood` — beban GET terukur dan dibatasi (`--requests`)
+
+Rel keamanan: concurrency default rendah, durasi dibatasi, batas request keras,
+dan **`--yes` wajib** sebelum ada beban nyata dikirim. Tanpa `--yes` Keris
+hanya dry-run:
+
+```bash
+# dry-run: menolak mengirim beban tanpa konfirmasi
+python -m keris dos https://contoh.com
+
+# uji berizin — HANYA untuk target yang Anda pegang izin tertulisnya
+python -m keris dos https://contoh.com --yes \
+  --type slowloris --concurrency 50 --duration 30 \
+  --json-output dos.json
+
+python -m keris dos https://contoh.com --yes --type flood \
+  --requests 500 --concurrency 20
+```
+
+Setelah uji, Keris memeriksa apakah layanan masih merespons request normal dan
+melaporkan temuan `HIGH` bila tidak — cocok untuk soak test / pengecekan HA
+otomatis. Jalankan hanya pada target yang Anda miliki atau sudah memiliki izin
+tertulis.
+
 ### Plugin: tambahkan check buatan sendiri
 
 Dua jenis plugin dimuat dari `plugins_dir` (default `plugins/`):
@@ -837,7 +923,7 @@ Contoh GitHub Actions:
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard)
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / export / dashboard / dos)
 │   ├── payloads.py        # payload SQLi, XSS, SSRF + pola secret + parameter redirect/url/hidden
 │   ├── report.py          # generator laporan markdown
 │   ├── report_html.py     # generator laporan HTML mandiri
@@ -867,6 +953,7 @@ keris/
 │   │   ├── waf.py         # fingerprint WAF & deteksi block page
 │   │   ├── export.py      # export sesi curl / Burp XML
 │   │   ├── notify.py      # webhook Slack/Discord/Telegram
+│   │   ├── dos.py         # uji ketahanan DoS app-layer (khusus berizin, --yes)
 │   │   ├── project.py     # self-audit kode sumber (ramah agent AI)
 │   │   ├── plugins.py     # engine plugin (Python + JSON)
 │   │   └── auth.py        # helper auth + auto-login form HTML
@@ -911,6 +998,7 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 - [x] Riwayat Wayback, DNS & email security, cek bucket cloud, analisis TLS
 - [x] Deteksi WAF, penemuan parameter tersembunyi, export curl/Burp, webhook, dashboard agregat
 - [x] Penyetelan scan sadar rate-limit (backoff adaptif)
+- [x] Uji ketahanan DoS app-layer (slowloris / slow POST / flood terukur, wajib `--yes`)
 
 ### Lisensi
 
