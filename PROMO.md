@@ -1,145 +1,155 @@
-# Promo Templates
+# PROMO — keris
 
-Templat siap copy-paste untuk mempromosikan `keris` (PyPI: `keris-toolkit`,
-GitHub: `github.com/dexpie/keris`). Sesuaikan emoji/hashtag seperlunya.
+Panduan ini **untuk kamu** (bukan template generik). Ide utamanya: postingan
+LinkedIn/tweet yang laku itu **cerita orangnya**, bukan daftar fitur. Jadi di
+bawah ini ada struktur + kalimat isian yang tinggal kamu lengkapi.
 
-## Screenshot siap pakai
-
-Ada di `docs/screenshots/` (generate ulang dengan `tools/make_screenshot.py`
-dan `tools/make_card.py`):
-
-| File | Ukuran | Kegunaan |
-|------|--------|----------|
-| `keris_card.png` | 1200×675 | Gambar utama postingan Twitter/X (rasio card) |
-| `scan.png` | 3861×1480 | Potongan output scan penuh (recon → report) |
-| `banner.png` | 1179×592 | Banner peringatan brutal (mode `--pwn`) |
-
-Cara generate ulang (butuh Pillow):
-
-```bash
-python -m keris scan http://127.0.0.1:8099 --hunt --chain --triage > scan.out 2>&1
-python tools/make_screenshot.py scan.out docs/screenshots/scan.png
-python tools/make_card.py
-```
+Yang wajib kamu siapkan sebelum posting:
+- Screenshot dari `docs/screenshots/` (`keris_card.png`, `scan.png`)
+- Link repo: `github.com/dexpie/keris`
+- Satu kalimat "kenapa aku bikin ini" — itu hook yang paling penting
 
 ---
 
-## X / Twitter — Thread pendek
+## 1. LinkedIn — postingan utama
 
-**Tweet 1 (hook):**
-```
-I built a black-box web pentest toolkit that lives in your terminal. Give it
-one URL and it runs the whole job: recon, discovery, vulnerability scan,
-report. One command.
+### Yang dibutuhkan (ceklist)
 
-pip install keris-toolkit
-```
+- [ ] Hook personal (baris 1–3, maks 2 kalimat)
+- [ ] 1–2 screenshot (card keris + output scan)
+- [ ] Apa manfaatnya buat orang (bukan "38 fitur")
+- [ ] CTA: repo + `pip install keris-toolkit`
+- [ ] 3–5 hashtag
 
-**Tweet 2 (fitur):**
-```
-What it does:
-- 38 subcommands: recon, scan, brute, fuzz, jwt, cve, graphql, openapi...
-- Attack chains + AI triage + executive summary
-- Credential hunting (.git dumps, leaked keys) 
-- Live credential validation (prove the login works)
-- Auto-ticketing (GitHub/Jira), continuous watch mode, terminal UI
-- Brutal DoS hammer (slowloris + slow post + flood) -- authorized only
-```
+### Struktur yang bisa langsung kamu isi
 
-**Tweet 3 (safety + CTA):**
 ```
-Built to be honest about risk: every aggressive mode prints a red warning
-banner. You are responsible for your own actions. Only ever run this on
-targets you own or have written permission to test.
+[Aku buat tools ini karena] [ISI CERITA: misal waktu tes website sendiri,
+bingung liat laporan pentest yang njelimet, jadi bikin yang satu perintah
+selesai].
 
+Keris — toolkit pentest web yang jalan di terminal. Kasih satu URL, dia
+ngerjain semuanya: recon, discovery, vuln scan, sampai laporan. [ISI 1
+CONTOH: pas aku coba ke situs sendiri, langsung ketemu X dalam Y menit].
+
+Yang paling seru:
+- [ISI 1: misal --pwn jalanin semua modul sekali jalan]
+- [ISI 1: misal SSRF ketahuan lewat callback, bukan tebakan]
+- [ISI 1: misal credcheck buktiin password bocor beneran bisa login]
+
+Open source, gratis, di PyPI. Kalo mau nyoba:
 https://github.com/dexpie/keris
-#cybersecurity #pentesting #infosec #python
+
+[pip install keris-toolkit]
+
+#cybersecurity #pentesting #opensource #python #infosec
 ```
+
+Contoh versi terisi (kamu bisa ubah):
+
+```
+Aku sering bingung nerjemahin hasil scan pentest yang isinya ratusan baris.
+Jadi aku bikin Keris: toolkit web pentest yang hidup di terminal. Satu URL,
+dia kerjain recon sampai laporan.
+
+Pas aku coba ke web pribadi, langsung ketemu .git yang bocor + kredensial
+valid. Itu yang bikin aku yakin tools ini layak dibagi.
+
+Fitur andalan:
+- --pwn: semua modul jalan sekali jalan (hunt, exploit, brute, CVE)
+- SSRF terbukti lewat callback, bukan asumsi
+- credcheck: buktiin password bocor beneran bisa login
+
+Open source & gratis: https://github.com/dexpie/keris
+#cybersecurity #pentesting #opensource
+```
+
+### Tips khusus LinkedIn
+
+- **Buka dengan "Aku"** bukan "Saya membuat sebuah tools" — orang baca cerita,
+  bukan CV.
+- **Posting jam kerja** (Selasa–Kamis, 08.00–11.00 atau 19.00–21.00 waktu
+  setempat) lebih ramai.
+- **Komentar pertama** bisa berisi 2–3 screenshot + link, biar post-nya bersih.
+- Jangan pakai link di kalimat pertama — LinkedIn menekan jangkauan post yang
+  langsung "jualan".
 
 ---
 
-## X / Twitter — Post tunggal (padat)
+## 2. X / Twitter — thread
 
+**Tweet 1 (cerita, bukan fitur):**
 ```
-Keris — a Javanese dagger, reimagined as a web pentest toolkit ⚔️
+Aku bikin toolkit pentest web karena males buka 5 tools buat 1 pekerjaan.
+Sekarang: satu URL masuk, recon + scan + laporan keluar.
 
-One URL in, full recon + vuln scan + report out. Add --pwn --authorized for
-maximum effort (hunt + exploit + brute + CVE in one pass).
+[keris_card.png]
+```
 
+**Tweet 2 (bukti):**
+```
+Yang bikin aku kaget pas ngetes:
+- .git bocor ketemu otomatis
+- password valid kebukti bisa login (bukan nebak)
+- SSRF ketahuan lewat callback
+
+[scan.png]
+```
+
+**Tweet 3 (CTA + safety):**
+```
 pip install keris-toolkit
-https://github.com/dexpie/keris
+github.com/dexpie/keris
+
+Brutal tool — selau authorized testing aja. User tanggung jawab sendiri.
+
 #infosec #pentesting
 ```
 
 ---
 
-## LinkedIn
+## 3. Reddit (r/netsec / r/cybersecurity)
+
+Format `[Project]` + jujur soal limits:
 
 ```
-I've been building an open-source web security toolkit called Keris.
+[Project] Keris — terminal web pentest toolkit (open source)
 
-It's a terminal-based black-box scanner: point it at a URL and it handles
-recon, discovery, vulnerability scanning, and reporting in a single command.
-Highlights:
+Aku bikin ini dari hasil ngetes situs produksi. Yang bikin beda:
+- OOB SSRF (callback listener, bukan guess)
+- .git dump + credential hunting terintegrasi ke scan
+- credcheck: buktiin kredensial beneran bisa login
+- dos --hammer (slowloris + flood paralel, authorized only)
 
-- 38 subcommands covering recon, fuzzing, brute-force, JWT, GraphQL, CVE
-  probes, OpenAPI, and more
-- Attack-chain correlation and AI-assisted triage
-- Credential hunting and live credential validation
-- Auto-ticketing to GitHub/Jira, continuous monitoring, and a terminal UI
-- Honest safety rails: aggressive modes require explicit authorization flags
-
-Open source, MIT-licensed, on PyPI as keris-toolkit.
-
-https://github.com/dexpie/keris
-
-(For authorized testing only — always respect the law and target owners.)
-```
-
----
-
-## Reddit — r/netsec (dan r/cybersecurity)
-
-```
-[Project] Keris — a terminal black-box web pentest toolkit
-
-I built a Python CLI that runs the full recon -> discovery -> vuln scan ->
-report pipeline from one URL. Highlights:
-
-- 38 subcommands: scan, recon, fuzz, brute, jwt, cve, graphql, openapi,
-  cache poisoning, host-header, dos, and more
-- Correlated attack chains, AI triage + executive summary
-- Credential hunting (.git dumps, .env/backup, cloud secrets) with live
-  login validation
-- Auto-ticketing (GitHub/Jira), continuous watch mode, terminal UI
-- Aggressive modes (exploit, brute, CVE, DoS hammer) require an explicit
-  --authorized / --yes and print a warning banner — no stealth attacks
-
+Semua mode agresif wajib flag --authorized/--yes + banner peringatan.
 PyPI: keris-toolkit | Repo: https://github.com/dexpie/keris
-
-MIT licensed. Feedback and PRs welcome.
 ```
 
 ---
 
-## Daftar curated untuk submit (repo/daftar awesome)
+## 4. Daftar curated (submit sekali, ketemu lama)
 
-- `awesome-hacking` / `awesome-web-security`
+Fork repo-nya, tambah satu baris `- [keris](url) - deskripsi`, buat PR:
+
+- `awesome-hacking`
+- `awesome-web-security`
 - `awesome-cybersecurity` (infosecn1nja)
-- `ProjectDiscovery` community / `projectdiscovery/nuclei` ecosystem
-- Daftar tools "open source offensive security" (various GitHub lists)
-- HackerOne / Bugcrowd blog communities (writeup sebagai contoh alur)
+- dev.to / Medium / Hashnode — writeup cara pakai
 - r/netsec monthly tools megathread
-- dev.to / Medium / Hashnode (writeup tutorial)
-
-Cara submit daftar awesome: fork repo, edit README daftarnya (biasanya satu
-baris `- [keris](url) - deskripsi`), buat Pull Request.
 
 ---
 
-## Tips posting
+## Screenshot siap pakai
 
-- Lampirkan tangkapan layar terminal (output scan berwarna) — paling menarik.
-- Sebut "authorized testing only" di mana pun — menaikkan kredibilitas.
-- Pakai hashtag: `#cybersecurity #pentesting #infosec #python #devsecops`
-- Untuk X, 1–2 gambar + thread pendek performa terbaik.
+| File | Ukuran | Kegunaan |
+|------|--------|----------|
+| `keris_card.png` | 1200×675 | Gambar utama tweet & LinkedIn |
+| `scan.png` | 3861×1480 | Potongan output scan asli |
+| `banner.png` | 1179×592 | Banner peringatan brutal |
+
+Generate ulang:
+```bash
+python -m keris scan http://127.0.0.1:8099 --hunt --chain --triage > scan.out 2>&1
+python tools/make_screenshot.py scan.out docs/screenshots/scan.png
+python tools/make_card.py
+```
