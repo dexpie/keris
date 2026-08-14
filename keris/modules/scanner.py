@@ -209,7 +209,10 @@ def check_rate_limit(client: KerisHTTP, url: str, n: int = 8) -> Optional[Findin
             codes.append(r.status_code)
         except requests.RequestException:
             codes.append(0)
-        if codes[-1] in (429, 503) or any(h.lower() == "x-ratelimit-remaining" and v == "0" for h, v in getattr(r, "headers", {}).items()):
+        if codes[-1] in (429, 503) or (
+            codes[-1] != 0
+            and any(h.lower() == "x-ratelimit-remaining" and v == "0" for h, v in r.headers.items())
+        ):
             blocked = True
             break
     if blocked:

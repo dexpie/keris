@@ -313,6 +313,13 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                      help="KONFIRMASI izin tertulis untuk menjalankan beban nyata")
     pdo.add_argument("--json-output", help="File output JSON")
 
+    # serve (Web UI lokal)
+    psv = sub.add_parser("serve", help="Jalankan Web UI lokal (tempel link -> scan otomatis)")
+    psv.add_argument("--host", default="127.0.0.1", help="Host untuk bind (default: localhost saja)")
+    psv.add_argument("--port", type=int, default=8181, help="Port untuk UI (default: 8181)")
+    psv.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    psv.add_argument("--quiet", action="store_true", help="Minimal output")
+
     return p.parse_args(argv)
 
 
@@ -1433,6 +1440,13 @@ def _cmd_dos(args, cfg, overrides) -> int:
     return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
 
 
+def _cmd_serve(args, cfg, overrides) -> int:
+    from keris.ui import run_ui
+
+    run_ui(host=args.host, port=args.port)
+    return EXIT_OK
+
+
 def _cmd_export(args, cfg, overrides) -> int:
     from keris.modules.export import export_requests
 
@@ -1556,6 +1570,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_dashboard(args, cfg, overrides)
         if args.command == "dos":
             return _cmd_dos(args, cfg, overrides)
+        if args.command == "serve":
+            return _cmd_serve(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

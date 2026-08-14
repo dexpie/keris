@@ -12,7 +12,7 @@ Automated black-box security testing: recon → discovery → vulnerability scan
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-77%20passed-success)
+![Tests](https://img.shields.io/badge/tests-84%20passed-success)
 
 Keris is a command-line security toolkit that turns the manual workflow of a black-box web penetration test into repeatable, scriptable commands. It grew out of real engagements against production sites (Next.js/Vercel, PHP/LiteSpeed, React SPA) and is designed for pentesters, bug bounty hunters, DevOps, and AI coding agents.
 
@@ -52,7 +52,8 @@ Keris is a command-line security toolkit that turns the manual workflow of a bla
 ## Features / Fitur
 
 - **Full pipeline**: one command runs recon → discovery → vulnerability scan → report (`scan`)
-- **33 subcommands**: recon, passive, discover, scan, fuzz, jwt, ports, openapi, bruteforce, platforms, project, wayback, dns, buckets, tls, waf, params, hidden, crawl, graphql, takeover, smuggling, cachepoison, hostheader, websocket, jsanalysis, sensitive, retest, export, dashboard, dos, plugins, init
+- **34 subcommands**: recon, passive, discover, scan, fuzz, jwt, ports, openapi, bruteforce, platforms, project, wayback, dns, buckets, tls, waf, params, hidden, crawl, graphql, takeover, smuggling, cachepoison, hostheader, websocket, jsanalysis, sensitive, retest, export, dashboard, dos, serve, plugins, init
+- **Web UI (`serve`)**: paste a URL, click Scan — Keris runs the full scan in the background with live progress and downloadable MD/HTML/PDF/JSON reports
 - **Active attack modules** (authorized only): SQLi/CMDI/SSTI/XSS auto-exploit, extended credential brute-force, username enumeration, CVE/PoC probes
 - **Web cache poisoning & host header injection**: reflection of cacheable response headers / password-reset poisoning
 - **WebSocket security**: handshake auth, Origin validation, cross-origin hijacking
@@ -93,6 +94,24 @@ echo "exit code: $?"   # 0 = ok, 1 = high/critical finding, 2 = error
 python tests/demo_vuln_server.py        # intentionally vulnerable demo server on 127.0.0.1:8099
 python -m keris scan http://127.0.0.1:8099 -o demo.md --hidden-endpoints
 ```
+
+### Web UI (paste a link, scan everything)
+
+Start the local web UI, open your browser, paste a URL, click **Scan**:
+
+```bash
+python -m keris serve                 # http://127.0.0.1:8181
+python -m keris serve --port 9000     # custom port
+```
+
+- Full scan runs in the background (all extra modules on by default: cache
+  poisoning, host header, WebSocket, JS analysis, sensitive data, hidden
+  endpoints, fuzz, WAF, TLS, buckets, ...)
+- Live progress + streaming log in the browser
+- Download the finished report as **Markdown / HTML / PDF / JSON**
+- One scan at a time; use **Hentikan** to stop
+- Active attacks (exploit/brute/CVE) only appear after ticking "Saya punya izin
+  tertulis" — keep the UI bound to `127.0.0.1`; never expose it publicly.
 
 ---
 
@@ -155,6 +174,7 @@ Dependencies: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi, requ
 | `export` | Findings → curl / Burp XML sessions | Temuan → sesi curl / Burp XML |
 | `dashboard` | Aggregate JSON reports into HTML dashboard | Gabungkan laporan JSON menjadi dashboard HTML |
 | `dos` | **Authorized only** app-layer resilience test | **Khusus berizin** uji ketahanan app-layer |
+| `serve` | Local web UI: paste URL → scan → reports | Web UI lokal: tempel URL → scan → laporan |
 | `plugins` | Run only your custom checks | Jalankan hanya check kustom Anda |
 | `init` | Generate example `keris.json` | Buat contoh `keris.json` |
 
@@ -720,13 +740,14 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / hidden / crawl / graphql / takeover / smuggling / cachepoison / hostheader / websocket / jsanalysis / sensitive / retest / export / dashboard / dos)
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / hidden / crawl / graphql / takeover / smuggling / cachepoison / hostheader / websocket / jsanalysis / sensitive / retest / export / dashboard / dos / serve)
 │   ├── payloads.py        # SQLi, XSS, SSRF, CMDI, SSTI payloads + secret/redirect/url/hidden params
 │   ├── cvss.py            # CVSS v3.1 scoring + OWASP Top 10 mapping
 │   ├── report.py          # Markdown report generator
 │   ├── report_html.py     # Self-contained HTML report generator
 │   ├── report_pdf.py      # PDF report generator (reportlab)
 │   ├── report_dashboard.py# Aggregated HTML dashboard across targets
+│   ├── ui.py              # Local web UI (http.server): paste URL → scan → reports
 │   ├── core/
 │   │   ├── http.py        # HTTP client: auth, retry, proxy (incl. SOCKS), delay/throttle + adaptive rate-limit backoff
 │   │   ├── config.py      # keris.json loader
