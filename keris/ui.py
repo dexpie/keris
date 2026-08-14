@@ -478,177 +478,249 @@ _PAGE = r"""<!DOCTYPE html>
 <title>Keris — Web UI</title>
 <style>
 :root{
-  --bg:#0b0f17; --panel:#121826; --panel2:#0f1522; --border:#1e2a3f;
-  --txt:#d7e0ea; --muted:#7a8aa0; --accent:#3b82f6; --ok:#22c55e;
+  --bg:#0a0a0c; --bg2:#0e0f11; --panel:#131417; --panel2:#191a1e;
+  --border:#23252b; --border2:#2c2f37;
+  --txt:#c9cdd3; --muted:#6e7480; --dim:#4a4f58;
+  --brass:#d4a24e; --brass-dim:#6b5526; --brass-ink:#0f0d08;
+  --crit:#ff5f57; --high:#ff8a5c; --med:#ffd166; --low:#b7c85a; --info:#5ca8ff;
+  --mono:"JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
 }
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);
-  font-family:"Segoe UI",system-ui,Arial,sans-serif}
-header{padding:16px 24px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:12px}
-header h1{font-size:18px;margin:0;letter-spacing:1px}
-header h1 span{color:var(--accent)}
-header .ver{color:var(--muted);font-size:12px}
-.wrap{max-width:1100px;margin:0 auto;padding:20px}
-.card{background:var(--panel);border:1px solid var(--border);
-  border-radius:10px;padding:18px;margin-bottom:18px}
-label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
-input[type=text]{width:100%;padding:10px 12px;border-radius:8px;
-  border:1px solid var(--border);background:var(--panel2);color:var(--txt);
-  font-size:15px}
-select{padding:9px 10px;border-radius:8px;border:1px solid var(--border);
-  background:var(--panel2);color:var(--txt)}
+*{box-sizing:border-box;border-radius:0}
+::selection{background:var(--brass);color:var(--brass-ink)}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1200px 500px at 80% -10%, rgba(212,162,78,.05), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px),
+    var(--bg);
+  color:var(--txt);
+  font-family:var(--mono);
+  font-size:13px;
+  line-height:1.5;
+}
+header{
+  display:flex;align-items:center;gap:14px;
+  padding:10px 18px;
+  border-bottom:1px solid var(--border2);
+  background:linear-gradient(180deg,var(--bg2),var(--bg));
+}
+header .emblem{color:var(--brass);font-size:11px;line-height:1.15;white-space:pre;
+  padding-right:14px;border-right:1px solid var(--border2)}
+header .wordmark{font-size:17px;letter-spacing:4px;color:var(--brass);font-weight:700}
+header .wordmark small{color:var(--muted);font-size:10px;letter-spacing:2px;
+  display:block;font-weight:400;margin-top:2px}
+header .hdr-right{margin-left:auto;text-align:right;color:var(--muted);font-size:11px}
+header .hdr-right b{color:var(--txt)}
+.wrap{max-width:1120px;margin:0 auto;padding:18px}
+.pane{border:1px solid var(--border);background:var(--panel);margin-bottom:16px}
+.pane-head{display:flex;align-items:center;gap:8px;padding:6px 12px;
+  background:var(--panel2);border-bottom:1px solid var(--border);
+  color:var(--brass);font-size:11px;letter-spacing:2px;text-transform:uppercase}
+.pane-head .no{color:var(--dim);letter-spacing:0}
+.pane-head .fill{flex:1}
+.pane-body{padding:16px}
+label{display:block;font-size:11px;color:var(--muted);margin:10px 0 4px;letter-spacing:.5px}
+input[type=text],select{
+  width:100%;padding:8px 10px;
+  border:1px solid var(--border);background:var(--bg2);color:var(--txt);
+  font-family:var(--mono);font-size:13px;
+}
+input[type=text]:focus,select:focus{outline:none;border-color:var(--brass);
+  box-shadow:inset 0 -2px 0 var(--brass)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:700px){.grid{grid-template-columns:1fr}}
-.chk{display:flex;align-items:center;gap:8px;font-size:13px;margin:5px 0}
-.chk input{accent-color:var(--accent)}
-button{cursor:pointer;border:none;border-radius:8px;padding:11px 18px;
-  font-size:14px;font-weight:600}
-#go{background:var(--accent);color:#fff;width:100%;margin-top:14px}
-#go:disabled{opacity:.5;cursor:not-allowed}
-#stop{background:#b91c1c;color:#fff;margin-left:8px}
-#crit{background:#7f1d1d;color:#fff}
-.fbtn{background:var(--panel2);border:1px solid var(--border);color:var(--txt);
-  padding:6px 12px;font-size:12px;font-weight:400}
-.fbtn.active{border-color:#f43f5e;color:#fda4af;font-weight:600}
-.hint{color:var(--muted);font-size:12px;margin-top:6px}
-.sev{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;
-  font-weight:700;text-align:center;min-width:70px}
-.critical{background:#7f1d1d;color:#fca5a5}
-.high{background:#881337;color:#fda4af}
-.medium{background:#78350f;color:#fcd34d}
-.low{background:#3f2d04;color:#fde68a}
-.info{background:#1e3a5f;color:#93c5fd}
-#status{margin-bottom:12px}
-#progress{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:8px}
-#progress>div{height:100%;background:var(--accent);width:0%;transition:width .5s}
-pre#log{background:#070b12;border:1px solid var(--border);border-radius:8px;
-  padding:12px;height:260px;overflow-y:auto;font-size:12px;line-height:1.5;
-  white-space:pre-wrap;word-break:break-word;color:#9fb3c8}
-.cards{display:flex;gap:10px;flex-wrap:wrap}
-.sum{flex:1;min-width:90px;background:var(--panel2);border:1px solid var(--border);
-  border-radius:8px;padding:10px;text-align:center}
-.sum b{display:block;font-size:22px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
-th{background:var(--panel2);color:var(--muted);font-size:11px;text-transform:uppercase}
+.chk{display:flex;align-items:center;gap:8px;font-size:12px;margin:4px 0;cursor:pointer}
+.chk input{appearance:none;width:13px;height:13px;border:1px solid var(--muted);
+  background:var(--bg2);cursor:pointer;position:relative;flex:none}
+.chk input:checked{background:var(--brass);border-color:var(--brass)}
+.chk input:checked::after{content:"\2713";position:absolute;left:2px;top:-2px;
+  color:var(--brass-ink);font-size:11px;font-weight:700}
+.chk input:disabled{opacity:.35}
+.btn{cursor:pointer;border:1px solid var(--border2);background:var(--bg2);
+  color:var(--txt);padding:9px 16px;font-family:var(--mono);font-size:12px;
+  letter-spacing:1px;text-transform:uppercase}
+.btn:hover{border-color:var(--brass);color:var(--brass)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#go{background:var(--brass);border-color:var(--brass);color:var(--brass-ink);
+  font-weight:700;width:100%;margin-top:14px}
+#go:hover{background:#e3b45e;color:var(--brass-ink)}
+#crit{background:var(--crit);border-color:var(--crit);color:#160b09;font-weight:700}
+#crit:hover{background:#ff7a72;color:#160b09}
+#stop{background:transparent;border-color:var(--crit);color:var(--crit)}
+#go_dos{background:var(--crit);border-color:var(--crit);color:#160b09;font-weight:700;margin-top:12px}
+#go_dos:hover{background:#ff7a72;color:#160b09}
+.fbtn{background:var(--bg2);border:1px solid var(--border);color:var(--muted);
+  padding:5px 10px;font-family:var(--mono);font-size:11px;text-transform:uppercase}
+.fbtn.active{border-color:var(--brass);color:var(--brass);background:rgba(212,162,78,.08)}
+.hint{color:var(--muted);font-size:11px;margin-top:8px;line-height:1.5}
+.sev{display:inline-block;padding:1px 8px;font-size:11px;font-weight:700;
+  letter-spacing:1px;text-align:center;min-width:68px;border:1px solid currentColor}
+.sev.critical{color:var(--crit);background:rgba(255,95,87,.08)}
+.sev.high{color:var(--high);background:rgba(255,138,92,.08)}
+.sev.medium{color:var(--med);background:rgba(255,209,102,.08)}
+.sev.low{color:var(--low);background:rgba(183,200,90,.08)}
+.sev.info{color:var(--info);background:rgba(92,168,255,.08)}
+#status{margin-bottom:10px}
+#stage{color:var(--brass)}
+#progress{height:6px;background:var(--bg2);border:1px solid var(--border);margin-top:8px}
+#progress>div{height:100%;background:var(--brass);width:0%;transition:width .5s}
+pre#log{background:#08090a;border:1px solid var(--border);
+  padding:12px;height:280px;overflow-y:auto;font-size:12px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;color:#9aa5b1;
+  font-family:var(--mono)}
+.cards{display:flex;flex-wrap:wrap;border:1px solid var(--border)}
+.sum{flex:1;min-width:110px;background:var(--panel2);padding:10px 8px;text-align:center;
+  border-right:1px solid var(--border)}
+.sum:last-child{border-right:none}
+.sum b{display:block;font-size:22px;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--panel2);color:var(--muted);font-size:10px;letter-spacing:1px;
+  text-transform:uppercase}
+tr.f:hover{background:var(--bg2)}
 tr.hidden{display:none}
-.dl a{display:inline-block;margin:4px 6px 4px 0;padding:8px 14px;border-radius:8px;
-  background:var(--panel2);border:1px solid var(--border);color:var(--txt);
-  text-decoration:none;font-size:13px}
-.dl a:hover{border-color:var(--accent)}
-.empty{color:var(--muted);font-size:13px}
-pre#log::-webkit-scrollbar,table::-webkit-scrollbar{height:8px;width:8px}
-pre#log::-webkit-scrollbar-thumb,table::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-.error{color:#f87171}
-footer{color:var(--muted);font-size:11px;text-align:center;padding:16px}
+.dl a{display:inline-block;margin:4px 8px 4px 0;padding:7px 12px;
+  background:var(--bg2);border:1px solid var(--border);color:var(--txt);
+  text-decoration:none;font-size:12px;text-transform:uppercase;letter-spacing:1px}
+.dl a:hover{border-color:var(--brass);color:var(--brass)}
+.empty{color:var(--muted);font-size:12px}
+code{color:var(--brass);background:var(--bg2);padding:0 3px}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border2);border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:var(--brass-dim)}
+.error{color:var(--crit)}
+footer{color:var(--dim);font-size:11px;text-align:center;padding:14px;letter-spacing:1px}
+.ver{color:var(--muted);font-size:11px}
 </style>
 </head>
 <body>
 <header>
-  <h1>KERIS <span>WEB UI</span></h1>
-  <span class="ver">v<span id="ver"></span></span>
-  <span style="flex:1"></span>
-  <span class="ver" id="running"></span>
+  <pre class="emblem">    /\
+   /  \
+  / /\ \
+ / /  \ \
+ \ \__/ /
+  \____/
+     ||
+</pre>
+  <div>
+    <div class="wordmark">KERIS<small>MODULAR WEB PENTEST TOOLKIT</small></div>
+  </div>
+  <div class="hdr-right">
+    <div>v<span id="ver"></span></div>
+    <div id="running"><b>[ idle ]</b></div>
+  </div>
 </header>
 <div class="wrap">
-  <div class="card">
-    <form id="frm">
-      <label for="target">Target URL</label>
-      <input type="text" id="target" placeholder="https://example.com"
-             value="http://127.0.0.1:8099" required>
-      <div class="grid" style="margin-top:12px">
+
+  <div class="pane">
+    <div class="pane-head"><span class="no">01</span> SCAN TARGET <span class="fill"></span><span class="no">CVE &amp; WEB</span></div>
+    <div class="pane-body">
+      <form id="frm">
+        <label for="target">target_url</label>
+        <input type="text" id="target" placeholder="https://example.com"
+               value="http://127.0.0.1:8099" required>
+        <div class="grid" style="margin-top:12px">
+          <div>
+            <label for="preset">preset_kecepatan</label>
+            <select id="preset">
+              <option value="fast">fast (cepat, agresif)</option>
+              <option value="stealth">stealth (lambat, hati-hati)</option>
+              <option value="aggressive">aggressive (paling dalam)</option>
+            </select>
+          </div>
+          <div>
+            <label for="authorized">izin_serangan_aktif</label>
+            <div class="chk"><input type="checkbox" id="authorized">
+              <span>saya punya izin tertulis untuk menguji target</span></div>
+          </div>
+        </div>
+        <label>modul_tambahan (aktif otomatis)</label>
+        <div class="grid" id="modgrid"></div>
+        <div class="hint">web cache poisoning, host header, WebSocket, JS analysis,
+          sensitive data, hidden endpoint, fuzz, dsb. -- otomatis dijalankan pada
+          setiap scan penuh.</div>
+        <div style="display:flex;gap:8px">
+          <button type="submit" id="go" class="btn">MULAI SCAN</button>
+          <button type="button" id="crit" class="btn">CARIKRITIKAL</button>
+          <button type="button" id="stop" class="btn" style="display:none">HENTIKAN</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="pane" id="panel-dos">
+    <div class="pane-head"><span class="no">02</span> UJI DOS (APP-LAYER) <span class="fill"></span><span class="no">TERUKUR</span></div>
+    <div class="pane-body">
+      <div class="grid">
         <div>
-          <label for="preset">Preset kecepatan</label>
-          <select id="preset">
-            <option value="fast">Fast (cepat, agresif)</option>
-            <option value="stealth">Stealth (lambat, hati-hati)</option>
-            <option value="aggressive">Aggressive (paling dalam)</option>
+          <label for="dos_type">jenis_uji</label>
+          <select id="dos_type">
+            <option value="all">all (slowloris + slow POST + flood)</option>
+            <option value="slowloris">slowloris</option>
+            <option value="slowpost">slow POST (RUDY)</option>
+            <option value="flood">flood GET terukur</option>
           </select>
         </div>
         <div>
-          <label for="authorized">Izin serangan aktif</label>
-          <div class="chk"><input type="checkbox" id="authorized">
-            <span>Saya punya izin tertulis untuk menguji target</span></div>
+          <label for="dos_concurrency">koneksi/thread bersamaan</label>
+          <input type="text" id="dos_concurrency" value="10">
+        </div>
+        <div>
+          <label for="dos_duration">durasi (detik)</label>
+          <input type="text" id="dos_duration" value="20">
+        </div>
+        <div>
+          <label for="dos_requests">batas total request (flood)</label>
+          <input type="text" id="dos_requests" value="200">
         </div>
       </div>
-      <label>Modul tambahan (semua aktif secara default)</label>
-      <div class="grid" id="modgrid"></div>
-      <div class="hint">Catatan: web cache poisoning, host header, WebSocket,
-        JS analysis, sensitive data, hidden endpoint, fuzz, dsb. otomatis
-        dijalankan pada setiap scan penuh.</div>
-      <div style="display:flex;gap:8px">
-        <button type="submit" id="go">MULAI SCAN</button>
-        <button type="button" id="crit">CARIKRITIKAL</button>
-        <button type="button" id="stop" style="display:none">HENTIKAN</button>
+      <div class="chk" style="margin-top:10px">
+        <input type="checkbox" id="dos_confirm">
+        <span style="color:var(--crit)">saya punya IZIN TERTULIS dan memahami uji
+          ini membebani layanan target</span>
       </div>
-    </form>
-  </div>
-
-  <div class="card" id="panel-dos">
-    <h3 style="margin-top:0">Uji DoS (app-layer)</h3>
-    <div class="grid">
-      <div>
-        <label for="dos_type">Jenis uji</label>
-        <select id="dos_type">
-          <option value="all">Semua (slowloris + slow POST + flood)</option>
-          <option value="slowloris">Slowloris</option>
-          <option value="slowpost">Slow POST (RUDY)</option>
-          <option value="flood">Flood GET terukur</option>
-        </select>
-      </div>
-      <div>
-        <label for="dos_concurrency">Koneksi/thread bersamaan</label>
-        <input type="text" id="dos_concurrency" value="10">
-      </div>
-      <div>
-        <label for="dos_duration">Durasi (detik)</label>
-        <input type="text" id="dos_duration" value="20">
-      </div>
-      <div>
-        <label for="dos_requests">Batas total request (flood)</label>
-        <input type="text" id="dos_requests" value="200">
-      </div>
+      <button type="button" id="go_dos" class="btn">JALANKAN UJI DOS</button>
+      <div class="hint">non-destruktif &amp; terukur: durasi &amp; jumlah request
+        dibatasi. tanpa izin tertulis uji tidak dijalankan.</div>
     </div>
-    <div class="chk" style="margin-top:10px">
-      <input type="checkbox" id="dos_confirm">
-      <span style="color:#f87171">Saya punya IZIN TERTULIS dan memahami uji ini
-        membebani layanan target</span>
+  </div>
+
+  <div class="pane" id="panel-live" style="display:none">
+    <div class="pane-head"><span class="no">03</span> STATUS <span class="fill"></span><span class="no" id="elapsed"></span></div>
+    <div class="pane-body">
+      <div id="status"><b id="stage">menyiapkan...</b></div>
+      <div id="progress"><div></div></div>
+      <pre id="log"></pre>
     </div>
-    <button type="button" id="go_dos" style="margin-top:10px;background:#b91c1c">JALANKAN UJI DOS</button>
-    <div class="hint">Non-destruktif &amp; terukur: durasi &amp; jumlah request dibatasi.
-      Tanpa izin tertulis uji tidak akan dijalankan.</div>
   </div>
 
-  <div class="card" id="panel-live" style="display:none">
-    <div id="status"><b id="stage">Menyiapkan...</b>
-      <span class="ver" id="elapsed"></span></div>
-    <div id="progress"><div></div></div>
-    <pre id="log"></pre>
-  </div>
-
-  <div class="card" id="panel-results" style="display:none">
-    <h3 style="margin-top:0">Hasil Scan</h3>
-    <div class="cards" id="sumcards"></div>
-    <div style="margin-top:10px" class="dl">
-      <b class="ver">Filter:</b>
-      <button type="button" class="fbtn" data-f="all">Semua</button>
-      <button type="button" class="fbtn" data-f="critical">Kritis</button>
-      <button type="button" class="fbtn" data-f="high">High</button>
-      <button type="button" class="fbtn" data-f="medium">Medium</button>
-      <button type="button" class="fbtn" data-f="low">Low</button>
+  <div class="pane" id="panel-results" style="display:none">
+    <div class="pane-head"><span class="no">04</span> HASIL <span class="fill"></span><span class="no">TEMUAN</span></div>
+    <div class="pane-body">
+      <div class="cards" id="sumcards"></div>
+      <div style="margin-top:12px" class="dl">
+        <b class="ver">filter:</b>
+        <button type="button" class="fbtn" data-f="all">Semua</button>
+        <button type="button" class="fbtn" data-f="critical">Kritis</button>
+        <button type="button" class="fbtn" data-f="high">High</button>
+        <button type="button" class="fbtn" data-f="medium">Medium</button>
+        <button type="button" class="fbtn" data-f="low">Low</button>
+      </div>
+      <div style="margin-top:12px" class="dl" id="downloads"></div>
+      <table style="margin-top:12px" id="tbl">
+        <thead><tr><th>Severity</th><th>Lokasi</th><th>Temuan</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
     </div>
-    <div style="margin-top:14px" class="dl" id="downloads"></div>
-    <table style="margin-top:14px" id="tbl">
-      <thead><tr><th>Severity</th><th>Lokasi</th><th>Temuan</th></tr></thead>
-      <tbody id="tbody"></tbody>
-    </table>
   </div>
 
-  <div class="card" id="panel-history" style="display:none">
-    <h3 style="margin-top:0">Riwayat Scan</h3>
-    <div id="history"></div>
+  <div class="pane" id="panel-history" style="display:none">
+    <div class="pane-head"><span class="no">05</span> RIWAYAT SCAN <span class="fill"></span></div>
+    <div class="pane-body"><div id="history"></div></div>
   </div>
+
 </div>
 <footer>Keris — Modular Web Pentest Toolkit. Pastikan Anda memiliki izin
 sebelum menguji target apa pun.</footer>
@@ -786,7 +858,7 @@ async function refreshHistory(){
       j.status==="error"?`<span class='sev high'>error</span>`:`<span class='sev medium'>${j.status}</span>`;
     const cnt=Object.entries(j.summary||{}).filter(([k])=>"CRITICAL,HIGH,MEDIUM,LOW,INFO".includes(k))
       .map(([k,v])=>`<b>${k} ${v}</b>`).join(" · ");
-    return `<div style="margin:8px 0;padding:8px;border:1px solid var(--border);border-radius:8px">
+    return `<div style="margin:8px 0;padding:8px;border:1px solid var(--border);background:var(--bg2)">
       <code>${esc(j.target)}</code> ${st}
       <span class="ver" style="float:right">${new Date(j.created*1000).toLocaleString()}</span>
       ${cnt?`<div class="ver">${cnt}</div>`:""}</div>`;
