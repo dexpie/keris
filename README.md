@@ -186,6 +186,13 @@ python -m pytest tests -q
 ruff check keris tests
 ```
 
+### Scan otomatis tiap PR
+
+Tersedia workflow contoh di `.github/workflows/scan-pr.yml`. Cara pakainya:
+tulis `https://url-target` di body PR (atau komentar `/scan <url>`), workflow
+menginstall `keris-toolkit`, menjalankan scan, lalu mengomentari ringkasan
+temuan di PR. Artifact laporan lengkap ikut tersimpan.
+
 ## Struktur
 
 ```

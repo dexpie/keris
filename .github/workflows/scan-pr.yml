@@ -1,0 +1,95 @@
+name: Security scan on PR
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  scan:
+    name: Scan target from PR body
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract target URL
+        id: target
+        run: |
+          # Ambil URL pertama yang mirip https://... dari body PR atau komentar.
+          # Contoh trigger: "/scan https://staging.example.com"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            body="${{ github.event.pull_request.body }}"
+          else
+            body="${{ github.event.comment.body }}"
+          fi
+          url=$(echo "$body" | grep -oE 'https?://[^ )]+' | head -n1 || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Install keris-toolkit
+        run: pip install keris-toolkit
+
+      - name: Run scan
+        id: scan
+        run: |
+          url="${{ steps.target.outputs.url }}"
+          if [ -z "$url" ]; then
+            echo "no_target=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          keris scan "$url" -o scan-report.md \
+            --json-output scan.json \
+            --exit-on high \
+            || true
+
+      - name: Post result comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const target = process.env.TARGET_URL;
+            if (!target) {
+              return;
+            }
+            let summary = "";
+            try {
+              const fs = require("fs");
+              const j = JSON.parse(fs.readFileSync("scan.json", "utf8"));
+              const count = (j.findings || []).reduce((a, f) => {
+                a[f.severity] = (a[f.severity] || 0) + 1;
+                return a;
+              }, {});
+              summary = "Temuan: " + Object.keys(count).map(k => `${k}=${count[k]}`).join(", ") + ".";
+            } catch (e) {
+              summary = "Scan selesai (detail di artifact).";
+            }
+            const report = `<details><summary>Keris scan: ${target}</summary>\n\n\`\`\`\n${summary}\n\`\`\`\n\nLaporan lengkap ada di artifact \`scan-report\`.\n</details>`;
+            const context = github.context;
+            if (context.eventName === "pull_request") {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.payload.comment.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report,
+              });
+            }
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-report
+          path: |
+            scan-report.md
+            scan.json

@@ -1,3 +1,15 @@
 """Keris — Modular Web Pentest Toolkit."""
 
-__version__ = "0.3.0"
+from importlib import metadata
+
+__all__ = ["__version__"]
+
+
+def _version() -> str:
+    try:
+        return metadata.version("keris-toolkit")
+    except metadata.PackageNotFoundError:
+        return "0.3.1"
+
+
+__version__ = _version()
