@@ -1,0 +1,19 @@
+# Path spesifik Laravel
+artisan
+storage/logs/laravel.log
+storage/framework/sessions
+storage/framework/views
+storage/framework/cache
+.env.bak
+.env.old
+.env.save
+config/app.php
+config/database.php
+routes/web.php
+resources/views
+public/storage
+storage/debugbar
+horizon
+telescope
+nova
+api/documentation

@@ -93,6 +93,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--pwn", action="store_true",
                     help="MODE OVERPOWERED: aktifkan SEMUA modul + hunt + chain + triage + browser + exploit + brute + CVE sekaligus (wajib --authorized)")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
+    ps.add_argument("--parallel", action="store_true",
+                    help="Scan beberapa target secara paralel (butuh --targets, mempercepat batch besar)")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
     # --- serangan aktif (khusus berizin, wajib --authorized) ---
@@ -297,14 +299,22 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                       help="Endpoint yang diuji (dapat diulang). Default: '/' saja")
     psen.add_argument("--json-output", help="File output JSON")
 
-    # retest (perbandingan scan lama vs baru)
+    # retest (perbandingan scan lama vs baru, opsional --live untuk re-scan otomatis)
     pretest = sub.add_parser("retest", help="Bandingkan scan lama & scan baru (retest workflow)")
     pretest.add_argument("old_json", help="File hasil scan lama (JSON output Keris)")
-    pretest.add_argument("new_json", help="File hasil scan baru (JSON output Keris)")
+    pretest.add_argument("new_json", nargs="?", help="File hasil scan baru (wajib jika tanpa --live)")
+    pretest.add_argument("--live", action="store_true",
+                        help="Re-scan target dari old_json secara langsung lalu bandingkan")
+    pretest.add_argument("--authorized", action="store_true",
+                        help="Tandai pengujian resmi (diperlukan untuk --live yang menyentuh target)")
     pretest.add_argument("-o", "--output", help="File laporan markdown retest")
     pretest.add_argument("--json-output", help="File output JSON diff")
     pretest.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     pretest.add_argument("--quiet", action="store_true", help="Minimal output")
+    pretest.add_argument("--no-discover", action="store_true", help="Lewati discovery (untuk retest live)")
+    pretest.add_argument("--no-bruteforce", action="store_true", help="Lewati brute path (untuk retest live)")
+    pretest.add_argument("--no-plugins", action="store_true", help="Nonaktifkan plugin (untuk retest live)")
+    pretest.add_argument("--workers", type=int, help="Jumlah worker untuk brute (untuk retest live)")
 
     # export (curl/burp session dari temuan JSON)
     pex = sub.add_parser("export", help="Export temuan JSON menjadi curl / Burp XML")
@@ -431,7 +441,7 @@ def _merge_config(args) -> tuple:
     return cfg, overrides
 
 
-def _make_client(args, cfg: KerisConfig, overrides: dict) -> KerisHTTP:
+def _make_client(args, cfg: KerisConfig, overrides: dict, base: str = "") -> KerisHTTP:
     token = overrides.get("token", cfg.token)
     cookie = overrides.get("cookie", cfg.cookie)
     basic = None
@@ -439,7 +449,7 @@ def _make_client(args, cfg: KerisConfig, overrides: dict) -> KerisHTTP:
     pwd = overrides.get("password", cfg.password)
     if uname and pwd:
         basic = (uname, pwd)
-    return KerisHTTP(
+    client = KerisHTTP(
         token=token,
         cookie=cookie,
         basic_auth=basic,
@@ -450,6 +460,17 @@ def _make_client(args, cfg: KerisConfig, overrides: dict) -> KerisHTTP:
         delay=overrides.get("delay", cfg.delay),
         extra_headers=cfg.headers,
     )
+    # auto-login: semua subcommand dapat memakai sesi yang sudah terautentikasi
+    if base and getattr(args, "login_username", None) and getattr(args, "login_password", None):
+        info("=== AUTO LOGIN ===")
+        from keris.modules import auth as auth_module
+
+        client = auth_module.auto_login(
+            base, args.login_username, args.login_password,
+            login_paths=cfg.login_paths or None,
+            timeout=overrides.get("timeout", cfg.timeout),
+        )
+    return client
 
 
 def _get_plugins(args, cfg: KerisConfig) -> List[dict]:
@@ -460,17 +481,6 @@ def _get_plugins(args, cfg: KerisConfig) -> List[dict]:
 
 def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client: KerisHTTP) -> dict:
     findings = []
-
-    # auto-login: ganti client jika user memberi kredensial form login
-    if getattr(args, "login_username", None) and getattr(args, "login_password", None):
-        info("=== AUTO LOGIN ===")
-        from keris.modules import auth as auth_module
-
-        client = auth_module.auto_login(
-            base, args.login_username, args.login_password,
-            login_paths=cfg.login_paths or None,
-            timeout=overrides.get("timeout", cfg.timeout),
-        )
 
     # passive recon (crt.sh/whois) — opsional, tidak menyentuh target langsung
     passive = {}
@@ -490,7 +500,8 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     else:
         disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
         if not args.no_bruteforce:
-            dirs = discovery_module.brute_directories(base, client, overrides.get("workers", cfg.workers))
+            stacks = discovery_module.detect_stack(recon)
+            dirs = discovery_module.brute_directories(base, client, overrides.get("workers", cfg.workers), stacks)
             disc["found_dirs"] = dirs
 
     info("=== SCANNER ===")
@@ -895,6 +906,16 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         ok(f"JSON output: {args.json_output}")
 
 
+def _suffixed(path: str, slug: str) -> str:
+    """Sisipkan slug sebelum ekstensi file, mis. scan.md -> scan-example_com.md."""
+    if not slug:
+        return path
+    dot = path.rfind(".")
+    if dot > path.rfind(os.sep):
+        return path[:dot] + "-" + slug + path[dot:]
+    return path + "-" + slug
+
+
 def _exit_code(findings: List[dict], threshold: str) -> int:
     if threshold == "none":
         return EXIT_OK
@@ -911,38 +932,73 @@ def _cmd_scan(args, cfg, overrides) -> int:
     all_results = []
     exit_codes = []
 
-    for target in targets:
-        info(f"\n===== TARGET: {target} =====")
+    def _scan_one(target: str):
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             result = _run_scan_single(base, args, cfg, overrides, client)
         except Exception as e:
             error(f"Scan gagal untuk {target}: {e}")
-            exit_codes.append(EXIT_ERROR)
-            continue
+            return base, None, EXIT_ERROR
         finally:
             client.close()
-        all_results.append(result)
         options = {"mode": "otomatis dengan Keris", "targets_file": bool(args.targets)}
-        _write_outputs(base, result, args, options, cfg)
-        # auto-ticketing (opsional): temuan -> GitHub/Jira
-        if getattr(args, "ticket", None):
-            from keris.modules.ticketing import create_tickets
+        if getattr(args, "parallel", False) and len(targets) > 1:
+            # tulis per-target ke file terpisah agar tidak saling timpa
+            import re as _re
 
-            try:
-                created = create_tickets(
-                    result["findings"],
-                    kind=args.ticket,
-                    cfg=cfg.to_dict() if hasattr(cfg, "to_dict") else {},
-                    repo=getattr(args, "ticket_repo", None),
-                    project=getattr(args, "ticket_project", None),
-                    min_severity=getattr(args, "ticket_min", "HIGH"),
-                )
-                ok(f"Auto-ticketing: {len(created)} tiket dibuat")
-            except Exception as e:
-                error(f"Auto-ticketing gagal: {e}")
-        exit_codes.append(_exit_code(result["findings"], getattr(args, "exit_on", "high")))
+            slug = _re.sub(r"[^A-Za-z0-9._-]+", "_", base.split("//")[-1].rstrip("/"))[:60]
+            options["per_target"] = True
+            if args.output:
+                from keris.report import write_report
+                write_report(result["recon"], result["discovery"], result["findings"],
+                             _suffixed(args.output, slug), base, options)
+            if getattr(args, "html_output", None):
+                from keris.report_html import write_html_report
+                write_html_report(result["recon"], result["discovery"], result["findings"],
+                                  _suffixed(args.html_output, slug), base, options)
+        else:
+            _write_outputs(base, result, args, options, cfg)
+        return base, result, _exit_code(result["findings"], getattr(args, "exit_on", "high"))
+
+    if getattr(args, "parallel", False) and len(targets) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        info(f"Scan paralel: {len(targets)} target")
+        with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+            futures = {pool.submit(_scan_one, t): t for t in targets}
+            for fut in as_completed(futures):
+                base, result, code = fut.result()
+                if result is None:
+                    exit_codes.append(code)
+                    continue
+                all_results.append(result)
+                exit_codes.append(code)
+    else:
+        for target in targets:
+            info(f"\n===== TARGET: {target} =====")
+            base, result, code = _scan_one(target)
+            if result is None:
+                exit_codes.append(code)
+                continue
+            all_results.append(result)
+            exit_codes.append(code)
+            # auto-ticketing (opsional): temuan -> GitHub/Jira
+            if getattr(args, "ticket", None):
+                from keris.modules.ticketing import create_tickets
+
+                try:
+                    created = create_tickets(
+                        result["findings"],
+                        kind=args.ticket,
+                        cfg=cfg.to_dict() if hasattr(cfg, "to_dict") else {},
+                        repo=getattr(args, "ticket_repo", None),
+                        project=getattr(args, "ticket_project", None),
+                        min_severity=getattr(args, "ticket_min", "HIGH"),
+                    )
+                    ok(f"Auto-ticketing: {len(created)} tiket dibuat")
+                except Exception as e:
+                    error(f"Auto-ticketing gagal: {e}")
 
     if len(targets) > 1:
         merged = {
@@ -960,6 +1016,16 @@ def _cmd_scan(args, cfg, overrides) -> int:
             with open(args.json_output, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2, default=str)
             ok(f"JSON multi-target: {args.json_output}")
+        # laporan gabungan multi-target
+        if args.output and len(targets) > 1:
+            from keris.report import write_report
+            write_report(merged["recon"], merged["discovery"], merged["findings"],
+                         args.output, ", ".join(targets), {"mode": "multi-target paralel" if getattr(args, "parallel", False) else "multi-target"})
+        if getattr(args, "html_output", None) and len(targets) > 1:
+            from keris.report_html import write_html_report
+            write_html_report(merged["recon"], merged["discovery"], merged["findings"],
+                              args.html_output, ", ".join(targets),
+                              {"mode": "multi-target paralel" if getattr(args, "parallel", False) else "multi-target"})
 
     # exit code terburuk
     worst = max(exit_codes) if exit_codes else EXIT_OK
@@ -970,7 +1036,7 @@ def _cmd_recon(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             result = recon_module.run_recon(base, client)
         finally:
@@ -1007,7 +1073,7 @@ def _cmd_fuzz(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
             info(f"Fuzz {len(disc.get('api_endpoints', []))} endpoint...")
@@ -1026,12 +1092,13 @@ def _cmd_discover(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             recon = recon_module.run_recon(base, client)
             disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
             if args.brute:
-                dirs = discovery_module.brute_directories(base, client, overrides.get("workers", cfg.workers))
+                stacks = discovery_module.detect_stack(recon)
+                dirs = discovery_module.brute_directories(base, client, overrides.get("workers", cfg.workers), stacks)
                 subs = discovery_module.brute_subdomains(base, client, overrides.get("workers", cfg.workers))
                 disc["found_dirs"] = dirs
                 disc["found_subdomains"] = subs
@@ -1056,7 +1123,7 @@ def _cmd_plugins(args, cfg, overrides) -> int:
         return EXIT_OK
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             recon = recon_module.run_recon(base, client)
             disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
@@ -1117,7 +1184,7 @@ def _cmd_openapi(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             spec = fetch_openapi(base, client)
             if not spec:
@@ -1165,7 +1232,7 @@ def _cmd_bruteforce(args, cfg, overrides) -> int:
     if getattr(args, "enumerate", False):
         for target in targets:
             base = normalize_url(target)
-            client = _make_client(args, cfg, overrides)
+            client = _make_client(args, cfg, overrides, base)
             try:
                 all_findings.extend(brute_module.enumerate_usernames(base, client, login_paths=login_paths))
             finally:
@@ -1173,7 +1240,7 @@ def _cmd_bruteforce(args, cfg, overrides) -> int:
 
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             atype = args.type
             if getattr(args, "extended", False):
@@ -1203,7 +1270,7 @@ def _cmd_platforms(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(platforms_module.check_platforms(base, client,
                                                                  platforms=args.names))
@@ -1297,7 +1364,7 @@ def _cmd_buckets(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(buckets_module.check_buckets(base, client, name=args.name))
         finally:
@@ -1338,7 +1405,7 @@ def _cmd_waf(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             info(f"=== WAF CHECK: {base} ===")
             res = detect_waf(base, client)
@@ -1368,7 +1435,7 @@ def _cmd_params(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
             all_findings.extend(discover_hidden_params(base, client, disc.get("api_endpoints", [])))
@@ -1393,7 +1460,7 @@ def _cmd_hidden(args, cfg, overrides) -> int:
             extra = [l.strip() for l in f if l.strip() and not l.startswith("#")]
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(find_hidden_endpoints(base, client, endpoints=extra))
         finally:
@@ -1413,7 +1480,7 @@ def _cmd_crawl(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             result = crawl(base, client, max_pages=args.max_pages, max_depth=args.max_depth)
             all_results.append(result)
@@ -1435,7 +1502,7 @@ def _cmd_graphql(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_graphql(base, client))
         finally:
@@ -1456,7 +1523,7 @@ def _cmd_takeover(args, cfg, overrides) -> int:
     for target in targets:
         base = normalize_url(target)
         host = host_from_url(base).split(":", 1)[0]
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_takeover(host, client))
         finally:
@@ -1475,7 +1542,7 @@ def _cmd_smuggling(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_smuggling(base, client))
         finally:
@@ -1494,7 +1561,7 @@ def _cmd_cachepoison(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_cache_poisoning(base, client,
                                                       paths=args.path or None))
@@ -1514,7 +1581,7 @@ def _cmd_hostheader(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_host_header(base, client,
                                                   paths=args.path or None))
@@ -1534,7 +1601,7 @@ def _cmd_websocket(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_websocket(base, client))
         finally:
@@ -1554,7 +1621,7 @@ def _cmd_jsanalysis(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             res = analyze_js(base, client, max_assets=args.max_assets)
             all_results.append({"target": base, "js_scanned": res["js_scanned"],
@@ -1578,7 +1645,7 @@ def _cmd_sensitive(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(check_sensitive(base, client,
                                                 endpoints=args.endpoint or None))
@@ -1594,9 +1661,90 @@ def _cmd_sensitive(args, cfg, overrides) -> int:
 def _cmd_retest(args, cfg, overrides) -> int:
     from keris.modules.retest import retest
 
+    if getattr(args, "live", False):
+        if not getattr(args, "authorized", False):
+            from keris.core.logger import error as _error
+            _error("retest --live menyentuh target secara langsung. Wajib --authorized.")
+            return EXIT_ERROR
+        return _cmd_retest_live(args, cfg, overrides)
+
+    if not args.new_json:
+        from keris.core.logger import error as _error
+        _error("Perlu argumen new_json, atau gunakan --live untuk re-scan otomatis.")
+        return EXIT_ERROR
     diff = retest(args.old_json, args.new_json, args.output, args.json_output)
     # exit 1 bila ada temuan baru / belum diperbaiki
     if diff["summary"]["new"] or diff["summary"]["persisting"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_retest_live(args, cfg, overrides) -> int:
+    """Re-scan target dari old_json lalu diff; buktikan temuan sudah fixed/persist."""
+    import json as _json
+    from keris.modules.retest import diff_findings, generate_diff_data, _load
+    from keris.core.logger import error as _error, ok as _ok, info as _info, warn as _warn
+
+    with open(args.old_json, "r", encoding="utf-8") as f:
+        old_data = _json.load(f)
+    if isinstance(old_data, dict) and "results" in old_data and isinstance(old_data["results"], list):
+        old_target = old_data.get("targets", [""])[0]
+        old_findings = [x for r in old_data["results"] for x in r.get("findings", [])]
+    elif isinstance(old_data, dict) and "target" in old_data:
+        old_target = old_data.get("target", "")
+        old_findings = old_data.get("findings", [])
+    else:
+        old_target = ""
+        old_findings = old_data if isinstance(old_data, list) else []
+    if not old_target:
+        _error("Target tidak bisa dibaca dari old_json.")
+        return EXIT_ERROR
+
+    _info("=== LIVE RETEST ===")
+    _info(f"Re-scan target: {old_target}")
+    base = normalize_url(old_target)
+    client = _make_client(args, cfg, overrides, base)
+    try:
+        new_result = _run_scan_single(base, args, cfg, overrides, client)
+    except Exception as e:
+        _error(f"Re-scan gagal: {e}")
+        return EXIT_ERROR
+    finally:
+        client.close()
+    new_findings = new_result["findings"]
+
+    diff = diff_findings(old_findings, new_findings)
+    s = diff["summary"]
+    _ok(f"Live retest: {s['fixed']} fixed, {s['new']} new, {s['persisting']} persisting "
+        f"(progres {s['progress']:.1f}%)")
+
+    # simpan hasil scan baru agar bisa dipakai retest offline selanjutnya
+    new_json_path = args.json_output.replace(".json", "-new.json") if args.json_output else None
+    md_path = args.output
+    if new_json_path:
+        payload = {
+            "tool": "keris",
+            "version": __version__,
+            "target": base,
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "summary": {"total": len(new_findings)},
+            "findings": new_findings,
+        }
+        with open(new_json_path, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, indent=2, default=str)
+        _ok(f"Hasil scan baru: {new_json_path}")
+    if md_path:
+        md, _ = generate_diff_data(old_target, old_findings, base, new_findings,
+                                   args.old_json, new_json_path or "")
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md)
+        _ok(f"Laporan retest live: {md_path}")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            _json.dump(diff, f, indent=2, default=str)
+        _ok(f"JSON retest: {args.json_output}")
+
+    if s["new"] or s["persisting"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1615,7 +1763,7 @@ def _cmd_dos(args, cfg, overrides) -> int:
     hammer = getattr(args, "hammer", False)
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             if hammer:
                 # mode brutal: semua vektor serentak dengan cap tinggi
@@ -1761,7 +1909,7 @@ def _cmd_credcheck(args, cfg, overrides) -> int:
     results = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             results.extend(validate_credentials(
                 base, creds, client=client,
@@ -1805,7 +1953,7 @@ def _cmd_hunt(args, cfg, overrides) -> int:
     all_findings = []
     for target in targets:
         base = normalize_url(target)
-        client = _make_client(args, cfg, overrides)
+        client = _make_client(args, cfg, overrides, base)
         try:
             all_findings.extend(run_hunt(base, client, verify=args.verify,
                                          extra_urls=args.asset))

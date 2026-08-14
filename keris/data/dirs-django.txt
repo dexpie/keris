@@ -1,0 +1,15 @@
+# Path spesifik Django
+settings.py
+settings.py.bak
+wsgi.py
+asgi.py
+admin/
+admin/login/
+static/admin
+media
+django-admin
+__debug__/
+debug
+graphql/
+api/schema/
+swagger/

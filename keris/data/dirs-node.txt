@@ -1,0 +1,18 @@
+# Path spesifik Node.js / Express / Next.js / Nuxt
+package.json
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+node_modules/
+next/
+nuxt/
+pages/
+api/auth/
+__nextjs_original-stack-frame
+_health
+trace
+server.js
+app.js
+index.js
+.env.local
+.env.production

@@ -32,3 +32,7 @@ Thumbs.db
 
 # Test runtime
 *.log
+
+# Catatan pribadi (bukan untuk repo publik)
+PROMO.md
+promo/

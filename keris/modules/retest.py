@@ -91,6 +91,17 @@ def generate_diff_report(old_path: str, new_path: str) -> Tuple[str, Dict]:
     """Bandingkan dua file scan; kembalikan (markdown, data)."""
     old_target, old = _load(old_path)
     new_target, new = _load(new_path)
+    return _report_from_data(old_target, old, new_target, new)
+
+
+def generate_diff_data(old_target: str, old: List[Dict], new_target: str, new: List[Dict],
+                       old_path: str = "", new_path: str = "") -> Tuple[str, Dict]:
+    """Bandingkan findings langsung (tanpa baca file); kembalikan (markdown, data)."""
+    return _report_from_data(old_target, old, new_target, new, old_path, new_path)
+
+
+def _report_from_data(old_target: str, old: List[Dict], new_target: str, new: List[Dict],
+                      old_path: str = "", new_path: str = "") -> Tuple[str, Dict]:
     diff = diff_findings(old, new)
     s = diff["summary"]
 
@@ -98,8 +109,8 @@ def generate_diff_report(old_path: str, new_path: str) -> Tuple[str, Dict]:
     lines = []
     lines.append("# Laporan Retest")
     lines.append("")
-    lines.append(f"**Scan lama:** `{old_path}` ({old_target or '?'})")
-    lines.append(f"**Scan baru:** `{new_path}` ({new_target or '?'})")
+    lines.append(f"**Scan lama:** `{old_path or old_target or '?'}`")
+    lines.append(f"**Scan baru:** `{new_path or new_target or '?'}`")
     lines.append(f"**Tanggal:** {now}")
     lines.append("")
     lines.append("## Ringkasan")

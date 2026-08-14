@@ -1,0 +1,18 @@
+# Path spesifik WordPress
+wp-json
+wp-json/wp/v2/users
+wp-content/uploads
+wp-content/plugins
+wp-content/themes
+wp-login.php
+wp-admin/install.php
+wp-admin/upgrade.php
+xmlrpc.php
+wp-cron.php
+wp-config.php.bak
+wp-config.php.save
+wp-content/debug.log
+wp-content/uploads/../wp-config.php
+license.txt
+readme.html
+wp-sitemap.xml

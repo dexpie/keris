@@ -136,7 +136,16 @@ Examples it detects:
 - **CORS wildcard + auth cookie** → HIGH.
 
 Chained findings carry a `"chain"` marker and `"source": "correlation"` in the
-JSON output, so they're easy to tell apart from raw findings.
+JSON output, so they're easy to tell apart from raw findings. The Markdown and
+HTML reports render them as a visual **Attack Paths** section.
+
+### Smart wordlists (per-stack)
+
+Directory brute-force detects the target's technology stack from recon headers
+(WordPress, Laravel, Django, Node/Express, Java/Spring) and automatically merges
+the matching extra wordlist, so it probes framework-specific paths like
+`/wp-json/wp/v2/users`, `/storage/logs/laravel.log`, `/actuator/env` or
+`/api/auth/__nextjs_original-stack-frame` — no manual wordlist switching.
 
 ### AI triage + executive summary (`--triage`)
 
@@ -344,13 +353,15 @@ keris scan https://example.com --authorized --exploit-cve
 ## Authentication
 
 Bearer token, session cookie, basic auth, or full HTML form auto-login (the
-session is captured for the whole scan):
+session is captured and reused across **every** subcommand — `scan`, `recon`,
+`discover`, `hunt`, `fuzz`, and more):
 
 ```bash
 keris scan https://app.example.com --token eyJhbGciOi...
 keris scan https://app.example.com --cookie "session=abc123"
 keris scan https://app.example.com --login-username admin --login-password hunter2
-keris scan https://example.com --proxy http://127.0.0.1:8080
+keris recon https://app.example.com --login-username admin --login-password hunter2
+keris example.com --proxy http://127.0.0.1:8080
 ```
 
 ## Reports
@@ -367,10 +378,24 @@ keris scan https://example.com -o report.md \
 
 Also available:
 
+- **Attack Paths**: when `--chain` finds correlation, the HTML and Markdown
+  reports include a visual attack-path section showing the step-by-step chain
+  (each finding rendered as a node, ending at the final impact).
 - **Retest**: `keris retest jan.json feb.json -o retest.md` groups findings
   into fixed / new / persisting and prints a remediation progress percentage.
   Non-zero exit when anything remains — usable as a "has the fix landed?" CI
   gate.
+- **Live retest (auto re-verify)**: `keris retest jan.json --live
+  --authorized` re-scans the target from the old JSON, re-verifies each finding,
+  and proves which ones are fixed vs still persisting:
+  ```bash
+  keris retest jan.json --live --authorized -o retest.md --json-output diff.json
+  ```
+- **Parallel multi-target**: scan a batch of targets at once:
+  ```bash
+  keris scan --targets targets.txt --parallel -o all.md --json-output all.json
+  ```
+  Each target also gets its own per-target report (`report-<host>.md`).
 - **Export**: findings to curl scripts or Burp XML sessions.
 - **Dashboard**: merge multiple `--json-output` files into one HTML.
 - **Webhook**: Slack / Discord / Telegram notifications.

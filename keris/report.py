@@ -147,6 +147,26 @@ def generate_report(
         for f in sorted(findings, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "INFO").upper(), 9)):
             lines.append(f"| {_severity_badge(f.get('severity', 'INFO'))} | `{_esc(f.get('endpoint', ''))}` | {_esc(f.get('title', ''))} |")
         lines.append("")
+
+    # Attack paths visual (hasil correlation engine)
+    chains = [f for f in findings if f.get("source") == "correlation"]
+    if chains:
+        lines.append("## 6. Attack Paths")
+        lines.append("")
+        for f in sorted(chains, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "HIGH").upper(), 9)):
+            lines.append(f"### [{f.get('severity', 'HIGH')}] {f.get('title', '')}")
+            lines.append("")
+            lines.append(f"**Tujuan akhir:** `{f.get('endpoint', '')}`")
+            lines.append("")
+            ev = f.get("evidence", "") or ""
+            steps = [s.strip() for s in ev.replace("Chain terbentuk dari:", "").split(";") if s.strip()]
+            for idx, s in enumerate(steps, 1):
+                lines.append(f"{idx}. {s}")
+            lines.append("")
+            lines.append(f"**Mengapa kritis:** {f.get('detail', '')}")
+            lines.append("")
+
+    if findings:
         lines.append("### Detail")
         lines.append("")
         for i, f in enumerate(sorted(findings, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "INFO").upper(), 9)), 1):
@@ -171,7 +191,7 @@ def generate_report(
                 lines.append("")
 
     # Rekomendasi
-    lines.append("## 6. Rekomendasi Prioritas")
+    lines.append("## 7. Rekomendasi Prioritas")
     lines.append("")
     lines.append("1. Verifikasi dan perbaiki temuan berlevel HIGH/CRITICAL terlebih dahulu.")
     lines.append("2. Pastikan rate limiting aktif pada seluruh endpoint autentikasi dan API publik.")

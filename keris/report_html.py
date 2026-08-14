@@ -1,6 +1,7 @@
 """Generator laporan HTML mandiri (self-contained) dari hasil scan Keris."""
 
 import html
+import re
 from datetime import datetime
 from typing import Dict, List
 
@@ -17,6 +18,53 @@ SEV_COLORS = {
 
 def _e(s) -> str:
     return html.escape(str(s or ""))
+
+
+def _parse_chain(f: Dict) -> List[dict]:
+    """Parse evidence chain 'Chain terbentuk dari: [SEV] title @ endpoint; ...'."""
+    ev = f.get("evidence", "") or ""
+    steps = []
+    body = ev
+    if "Chain terbentuk dari:" in ev:
+        body = ev.split("Chain terbentuk dari:", 1)[1]
+    for part in body.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"^\[([A-Z]+)\]\s+(.+?)\s+@\s+(.+)$", part)
+        if m:
+            steps.append({"severity": m.group(1), "title": m.group(2).strip(),
+                          "endpoint": m.group(3).strip()})
+    return steps
+
+
+def _attack_path_html(findings: List[Dict]) -> str:
+    """Rendering visual attack paths dari temuan correlation (source=correlation)."""
+    chains = [f for f in findings if f.get("source") == "correlation"]
+    if not chains:
+        return ""
+    blocks = []
+    for f in chains:
+        steps = _parse_chain(f)
+        nodes = []
+        if steps:
+            for i, s in enumerate(steps):
+                nodes.append(
+                    f'<div class="node"><span class="badge" style="background:{SEV_COLORS.get(s["severity"].upper(), "#666")}">'
+                    f'{_e(s["severity"])}</span> <b>{_e(s["title"])}</b>'
+                    f'<div class="node-ep">{_e(s["endpoint"])}</div></div>')
+                if i < len(steps) - 1:
+                    nodes.append('<div class="arrow">&#8680;</div>')
+        else:
+            nodes.append(f'<div class="node">{_e(f.get("endpoint", ""))}</div>')
+        blocks.append(
+            f'<div class="card"><div class="card-head">'
+            f'<span class="badge" style="background:{SEV_COLORS.get(f.get("severity", "HIGH").upper(), "#666")}">'
+            f'{_e(f.get("severity", "HIGH").upper())}</span>'
+            f'<span class="card-title">{_e(f.get("title", ""))}</span></div>'
+            f'<div class="path">{ "".join(nodes) }</div>'
+            f'<p class="path-why">{_e(f.get("detail", ""))}</p></div>')
+    return f'<h2>Attack Paths</h2><div class="paths">{ "".join(blocks) }</div>'
 
 
 def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: List[Dict], options: Dict = None) -> str:
@@ -68,6 +116,8 @@ def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: Li
     if not findings:
         finding_cards = '<div class="card"><p>No vulnerabilities detected during this scan.</p></div>'
 
+    attack_paths = _attack_path_html(findings)
+
     from keris.cvss import owasp_summary
 
     _owasp = owasp_summary(findings)
@@ -112,6 +162,12 @@ pre {{ background: #0f172a; padding: 10px; border-radius: 6px; font-size: 11px; 
 ul {{ padding-left: 20px; font-size: 13px; }}
 li {{ margin: 3px 0; }}
 .footer {{ margin-top: 30px; font-size: 12px; color: #64748b; text-align: center; }}
+.paths {{ display: flex; flex-direction: column; gap: 12px; }}
+.path {{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }}
+.node {{ background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; font-size: 12px; max-width: 320px; }}
+.node-ep {{ font-family: monospace; font-size: 11px; color: #93c5fd; margin-top: 2px; }}
+.arrow {{ color: #fbbf24; font-size: 18px; font-weight: 700; }}
+.path-why {{ font-size: 12px; color: #94a3b8; margin-top: 6px; }}
 </style>
 </head>
 <body>
@@ -159,6 +215,8 @@ li {{ margin: 3px 0; }}
 
   <h2>Findings</h2>
   {finding_cards}
+
+  {attack_paths}
 
   <div class="footer">Generated automatically by Keris &middot; Verify any "indicated"/"potential" findings manually before acting.</div>
 </div>

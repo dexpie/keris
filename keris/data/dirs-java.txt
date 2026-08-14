@@ -1,0 +1,19 @@
+# Path spesifik Java / Spring Boot
+actuator
+actuator/health
+actuator/env
+actuator/beans
+actuator/mappings
+actuator/heapdump
+actuator/threaddump
+actuator/httptrace
+actuator/loggers
+actuator/configprops
+h2-console
+swagger-ui.html
+v2/api-docs
+v3/api-docs
+jolokia
+console
+error
+WEB-INF/web.xml
