@@ -1,7 +1,10 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from keris.modules.ssrf import _callback_host, _inject, _param_names
+from keris.modules.ssrf import (
+    _callback_host, _inject, _param_names, _fetch_through,
+    exploit_metadata, scan_internal_ports, INTERNAL_PORTS,
+)
 from keris.modules.waf import _signature_hits, PROBE_PAYLOADS
 
 
@@ -50,3 +53,66 @@ class TestWafSignatures:
 
     def test_probe_payloads_nonempty(self):
         assert len(PROBE_PAYLOADS) >= 5
+
+
+class TestSsrfExploit:
+    def test_fetch_through_returns(self):
+        class FakeClient:
+            def get(self, url, timeout=None):
+                class R:
+                    status_code = 200
+                    text = "fetched:" + url
+                return R()
+        code, body = _fetch_through("http://x/", FakeClient(),
+                                    "http://x/api?u=1", "u", "http://169.254.169.254/latest/meta-data/")
+        assert code == 200 and "169.254.169.254" in body
+
+    def test_fetch_through_error(self):
+        class FakeClient:
+            def get(self, url, timeout=None):
+                raise Exception("boom")
+        code, body = _fetch_through("http://x/", FakeClient(),
+                                    "http://x/api?u=1", "u", "http://y/")
+        assert code is None and body == ""
+
+    def test_exploit_metadata_detects_aws(self):
+        class FakeClient:
+            def get(self, url, timeout=None):
+                if "security-credentials" in url:
+                    class R:
+                        status_code = 200
+                        text = '{"AccessKeyId":"AKIA...","Token":"x"}'
+                else:
+                    class R:
+                        status_code = 404
+                        text = "not found"
+                return R()
+        fs = exploit_metadata("http://x/", FakeClient(),
+                              "http://x/api?u=1", "u")
+        assert fs and fs[0]["severity"] == "CRITICAL"
+        assert "AWS" in fs[0]["title"]
+
+    def test_exploit_metadata_no_hit(self):
+        class FakeClient:
+            def get(self, url, timeout=None):
+                class R:
+                    status_code = 404
+                    text = "nothing"
+                return R()
+        assert exploit_metadata("http://x/", FakeClient(),
+                                "http://x/api?u=1", "u") == []
+
+    def test_scan_ports_filters_gateway_error(self):
+        class FakeClient:
+            def get(self, url, timeout=None):
+                class R:
+                    status_code = 502 if "%3A443%2F" in url else 200
+                    text = "" if "%3A443%2F" in url else "banner"
+                return R()
+        fs = scan_internal_ports("http://x/", FakeClient(),
+                                 "http://x/api?u=1", "u", timeout=1)
+        assert fs and "443" not in fs[0]["evidence"]
+
+    def test_internal_ports_list(self):
+        assert (3306, "MySQL") in INTERNAL_PORTS
+        assert (6379, "Redis") in INTERNAL_PORTS

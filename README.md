@@ -291,19 +291,25 @@ fields) with a fallback to HTTP basic auth. Every confirmed credential is
 reported as HIGH so the owner can reset it immediately. Authorized use only —
 this is a live login attempt.
 
-### SSRF detection (`--ssrf`)
+### SSRF detection & exploitation (`--ssrf` / `--ssrf-exploit`)
 
 Proves SSRF **out-of-band**: keris spins up a local callback listener, injects
 its URL into every discovered query parameter, and waits. If the server makes a
 request back, SSRF is confirmed (CRITICAL) — even when the response is
-sanitized:
+sanitized. Once confirmed, `--ssrf-exploit` weaponizes it:
+
+- **Cloud metadata theft** — pulls AWS IAM credentials / GCP / Azure metadata
+  through the vulnerable parameter (`169.254.169.254`, `metadata.google.internal`).
+- **Internal port scan** — probes 15 common internal services on `localhost`
+  (MySQL, PostgreSQL, Redis, MongoDB, Elasticsearch, Docker, Kubernetes, …)
+  and reports which ones answer.
 
 ```bash
-keris scan https://example.com --ssrf
+keris scan https://example.com --ssrf --ssrf-exploit
 ```
 
-Callback host is chosen to match the target (loopback for local labs, your LAN
-IP for remote targets).
+This is the classic cloud-metadata attack chain: a single SSRF on a cloud-hosted
+app is enough to walk out with live IAM keys.
 
 ### WAF detection (`waf`)
 
@@ -469,6 +475,7 @@ keris/
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
 - [x] **OOB SSRF detection (`--ssrf`)**
+- [x] **SSRF exploitation: cloud metadata theft + internal port scan**
 - [x] **WAF detection & fingerprinting (`waf`)**
 
 ## Legal note

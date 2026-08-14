@@ -144,6 +144,27 @@ class VulnerableHandler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": "url required"}).encode())
                 return
             try:
+                if "169.254.169.254" in target_url and "security-credentials" in target_url:
+                    # simulasi metadata AWS untuk pengujian SSRF
+                    fake = json.dumps({
+                        "Code": "Success",
+                        "Type": "AWS-HMAC",
+                        "AccessKeyId": "AKIAFAKEFORSSRFTEST",
+                        "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                        "Token": "FAKETOKENFORSSRF",
+                        "Expiration": "2027-01-01T00:00:00Z",
+                    })
+                    self._send(200, fake.encode())
+                    return
+                import urllib.parse as _up
+                up = _up.urlparse(target_url)
+                if up.hostname == "127.0.0.1":
+                    banners = {3306: b"8.0.36-MySQL\x00", 6379: b"-ERR unknown command\r\n",
+                               9200: b'{"version":{"number":"8.11.0"}}',
+                               5432: b"PostgreSQL 15.3", 5000: b"flask app"}
+                    if up.port in banners:
+                        self._send(200, banners[up.port])
+                        return
                 with urllib.request.urlopen(target_url, timeout=4) as resp:
                     data = resp.read(1024)
                 self._send(200, json.dumps({"fetched": data.decode("utf-8", "replace")}).encode())

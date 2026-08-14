@@ -119,6 +119,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Analisis bundle JS untuk DOM XSS sinks & secret")
     ps.add_argument("--ssrf", action="store_true",
                     help="Deteksi SSRF via callback listener (out-of-band) pada tiap parameter")
+    ps.add_argument("--ssrf-exploit", action="store_true",
+                    help="Eksploitasi SSRF: coba ambil metadata cloud + scan port internal (butuh SSRF ditemukan)")
     ps.add_argument("--sensitive-data", action="store_true",
                     help="Scan paparan data sensitif (kredensial/PII/kartu)")
 
@@ -750,6 +752,21 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.extend(ssrf_findings)
             for f in ssrf_findings:
                 severity(f["severity"], f"{f['title']}: {f['endpoint']}")
+            # exploit: cloud metadata + port internal via SSRF terkonfirmasi
+            if ssrf_findings and getattr(args, "ssrf_exploit", False):
+                from keris.modules.ssrf import exploit_ssrf
+
+                try:
+                    v = ssrf_findings[0]
+                    vuln_url = v.get("vuln_url") or v.get("endpoint")
+                    vuln_param = v.get("vuln_param", "")
+                    if vuln_url and vuln_param:
+                        ex = exploit_ssrf(base, client, vuln_url, vuln_param)
+                        findings.extend(ex)
+                        for f in ex:
+                            severity(f["severity"], f"{f['title']}: {f['endpoint']}")
+                except Exception as e:
+                    warn(f"SSRF exploit gagal: {e}")
         except Exception as e:
             warn(f"SSRF probe gagal: {e}")
 
@@ -1862,7 +1879,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         for _flag in ("hunt", "chain", "triage", "browser", "exploit",
                       "brute_extended", "exploit_cve", "cache_poisoning",
-                      "host_header", "username_enum", "ssrf", "waf"):
+                      "host_header", "username_enum", "ssrf", "waf",
+                      "ssrf_exploit"):
             if not hasattr(args, _flag):
                 setattr(args, _flag, False)
             setattr(args, _flag, True)
