@@ -127,6 +127,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
     pr.add_argument("-o", "--output", help="Simpan hasil recon ke file JSON")
+    pr.add_argument("--json-output", help="File output JSON (sama dengan -o)")
 
     # passive recon
     pp = sub.add_parser("passive", parents=[common], help="Passive recon: crt.sh + whois (tanpa menyentuh target)")
@@ -137,6 +138,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pd.add_argument("--max-assets", type=int, help="Maksimum asset JS diunduh")
     pd.add_argument("--brute", action="store_true", help="Juga jalankan brute path & subdomain")
     pd.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
+    pd.add_argument("--json-output", help="File output JSON hasil discovery")
 
     # init (buat contoh config)
     pi = sub.add_parser("init", help="Buat contoh file konfigurasi keris.json")
@@ -973,10 +975,11 @@ def _cmd_recon(args, cfg, overrides) -> int:
             result = recon_module.run_recon(base, client)
         finally:
             client.close()
-        if args.output:
-            with open(args.output, "w", encoding="utf-8") as f:
+        out = args.json_output or args.output
+        if out:
+            with open(out, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, default=str)
-            ok(f"Hasil recon disimpan: {args.output}")
+            ok(f"Hasil recon disimpan: {out}")
     return EXIT_OK
 
 
