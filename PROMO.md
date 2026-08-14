@@ -3,6 +3,25 @@
 Templat siap copy-paste untuk mempromosikan `keris` (PyPI: `keris-toolkit`,
 GitHub: `github.com/dexpie/keris`). Sesuaikan emoji/hashtag seperlunya.
 
+## Screenshot siap pakai
+
+Ada di `docs/screenshots/` (generate ulang dengan `tools/make_screenshot.py`
+dan `tools/make_card.py`):
+
+| File | Ukuran | Kegunaan |
+|------|--------|----------|
+| `keris_card.png` | 1200×675 | Gambar utama postingan Twitter/X (rasio card) |
+| `scan.png` | 3861×1480 | Potongan output scan penuh (recon → report) |
+| `banner.png` | 1179×592 | Banner peringatan brutal (mode `--pwn`) |
+
+Cara generate ulang (butuh Pillow):
+
+```bash
+python -m keris scan http://127.0.0.1:8099 --hunt --chain --triage > scan.out 2>&1
+python tools/make_screenshot.py scan.out docs/screenshots/scan.png
+python tools/make_card.py
+```
+
 ---
 
 ## X / Twitter — Thread pendek
