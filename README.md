@@ -21,6 +21,10 @@ starts rate-limiting you.
 > find out whether something can be pierced. If it can't, fine. Either way,
 > the evidence lands in the report.
 
+<p align="center">
+  <img src="docs/screenshots/scan.png" alt="Keris scan running in the terminal" width="720">
+</p>
+
 ## ⚠️ WARNING — BRUTAL & OVERPOWERED TOOL
 
 Keris can run **active attacks**: auto-exploitation, brute-force with extended
@@ -64,13 +68,18 @@ keris scan http://127.0.0.1:8099 -o demo.md --hidden-endpoints
 
 ## Also has a web UI
 
-`serve` starts a local page at `http://127.0.0.1:8181`. Paste a link, hit Scan.
-The scan runs in the background, progress and logs stream into the browser, and
-you can download the finished report as Markdown / HTML / PDF / JSON.
+`serve` starts a local glassmorphism-styled page at `http://127.0.0.1:8181`.
+Paste a link, hit Scan. The scan runs in the background, progress and logs
+stream into the browser, and you can download the finished report as Markdown /
+HTML / PDF / JSON.
 
 ```bash
 python -m keris serve
 ```
+
+<p align="center">
+  <img src="docs/screenshots/ui_main.png" alt="Keris web UI" width="720">
+</p>
 
 Two buttons worth knowing:
 
@@ -82,6 +91,10 @@ Two buttons worth knowing:
 
 One scan at a time, with a stop button. The UI stays bound to `127.0.0.1`;
 never expose it publicly.
+
+<p align="center">
+  <img src="docs/screenshots/ui_scanning.png" alt="Keris web UI during a live scan" width="720">
+</p>
 
 ## Commands
 
