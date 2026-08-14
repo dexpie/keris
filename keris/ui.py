@@ -72,12 +72,13 @@ def _guess_stage(line: str):
 
 
 class ScanJob:
-    """Satu pekerjaan scan yang berjalan sebagai subprocess."""
+    """Satu pekerjaan (scan penuh atau uji DoS) yang berjalan sebagai subprocess."""
 
-    def __init__(self, target: str, options: dict):
+    def __init__(self, target: str, options: dict, kind: str = "scan"):
         self.id = uuid.uuid4().hex[:10]
         self.target = target
         self.options = options
+        self.kind = kind  # scan | dos
         self.status = "queued"  # queued | running | done | error | stopped
         self.stage = ""
         self.progress = 0.0
@@ -98,6 +99,7 @@ class ScanJob:
             d = {
                 "id": self.id,
                 "target": self.target,
+                "kind": self.kind,
                 "status": self.status,
                 "stage": self.stage,
                 "progress": self.progress,
@@ -213,38 +215,15 @@ class UIHandler(BaseHTTPRequestHandler):
             "json": "application/json; charset=utf-8",
         }
         if not os.path.exists(fname):
-            # pdf mungkin gagal saat generate; coba bangun ulang dari hasil scan
-            if fmt == "pdf" and job.findings:
-                self._regenerate(job, ["pdf"])
+            # mungkin gagal saat generate; coba bangun ulang dari findings
+            if job.findings:
+                _regenerate_reports(job, [fmt])
                 if os.path.exists(fname):
-                    self._file(fname, ctypes["pdf"])
+                    self._file(fname, ctypes.get(fmt, ctypes["json"]))
                     return
             self._json({"error": "laporan tidak tersedia"}, 404)
             return
         self._file(fname, ctypes.get(fmt, ctypes["json"]))
-
-    def _regenerate(self, job: ScanJob, formats):
-        """Bangun ulang laporan dari findings yang sudah ada (mis. PDF gagal)."""
-        try:
-            from keris.report import write_report
-            from keris.report_html import write_html_report
-
-            recon = {"host": job.target, "stack": [], "security_headers": []}
-            disc = {"api_endpoints": [], "js_assets": [], "secrets": []}
-            options = {"mode": "Web UI Keris"}
-            if "md" in formats:
-                write_report(recon, disc, job.findings,
-                             os.path.join(job.workdir, "report.md"), job.target, options)
-            if "html" in formats:
-                write_html_report(recon, disc, job.findings,
-                                  os.path.join(job.workdir, "report.html"), job.target, options)
-            if "pdf" in formats:
-                from keris.report_pdf import write_pdf_report
-
-                write_pdf_report(recon, disc, job.findings,
-                                 os.path.join(job.workdir, "report.pdf"), job.target, options)
-        except Exception:
-            pass
 
     # --- POST ---
     def do_POST(self):
@@ -263,6 +242,29 @@ class UIHandler(BaseHTTPRequestHandler):
                 self._json({"error": f"Scan sedang berjalan: {running[0].target}"}, 409)
                 return
             job = ScanJob(target, options)
+            with self.server.jobs_lock:
+                self.server.jobs[job.id] = job
+            t = threading.Thread(target=_worker, args=(job,), daemon=True)
+            t.start()
+            self._json({"id": job.id, "status": job.status})
+            return
+        if path == "/api/dos":
+            body = self._read_body()
+            target = (body.get("target") or "").strip()
+            if not target:
+                self._json({"error": "target wajib diisi"}, 400)
+                return
+            if not body.get("confirmed"):
+                self._json({"error": "Konfirmasi izin tertulis wajib untuk uji DoS"}, 400)
+                return
+            with self.server.jobs_lock:
+                running = [j for j in self.server.jobs.values() if j.status in ("queued", "running")]
+            if running:
+                self._json({"error": f"Pekerjaan sedang berjalan: {running[0].target}"}, 409)
+                return
+            options = dict(body.get("options") or {})
+            options["confirmed"] = True
+            job = ScanJob(target, options, kind="dos")
             with self.server.jobs_lock:
                 self.server.jobs[job.id] = job
             t = threading.Thread(target=_worker, args=(job,), daemon=True)
@@ -297,6 +299,20 @@ def _build_argv(job: ScanJob) -> list:
     return flags
 
 
+def _build_dos_argv(job: ScanJob) -> list:
+    opts = job.options or {}
+    flags = ["--no-color", "--yes"]
+    k = opts.get("type") or "all"
+    if k in ("slowloris", "slowpost", "flood", "all"):
+        flags += ["--type", k]
+    concurrency = int(opts.get("concurrency") or 10)
+    duration = float(opts.get("duration") or 20.0)
+    total = int(opts.get("requests") or 200)
+    flags += ["--concurrency", str(concurrency),
+              "--duration", str(duration), "--requests", str(total)]
+    return flags
+
+
 def _worker(job: ScanJob):
     with job._lock:
         job.status = "running"
@@ -305,15 +321,21 @@ def _worker(job: ScanJob):
     os.makedirs(workdir, exist_ok=True)
     job.workdir = workdir
 
-    argv = _build_argv(job)
-    cmd = [sys.executable, "-m", "keris", "scan", job.target]
-    cmd += argv
-    cmd += [
-        "-o", os.path.join(workdir, "report.md"),
-        "--html", os.path.join(workdir, "report.html"),
-        "--pdf", os.path.join(workdir, "report.pdf"),
-        "--json-output", os.path.join(workdir, "report.json"),
-    ]
+    if job.kind == "dos":
+        argv = _build_dos_argv(job)
+        cmd = [sys.executable, "-m", "keris", "dos", job.target]
+        cmd += argv
+        cmd += ["--json-output", os.path.join(workdir, "report.json")]
+    else:
+        argv = _build_argv(job)
+        cmd = [sys.executable, "-m", "keris", "scan", job.target]
+        cmd += argv
+        cmd += [
+            "-o", os.path.join(workdir, "report.md"),
+            "--html", os.path.join(workdir, "report.html"),
+            "--pdf", os.path.join(workdir, "report.pdf"),
+            "--json-output", os.path.join(workdir, "report.json"),
+        ]
     env = dict(os.environ)
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     if job._stop:
@@ -369,20 +391,34 @@ def _worker(job: ScanJob):
 
     with job._lock:
         job.findings = result.get("findings", [])
-        job.summary = result.get("summary", {})
+        summary = result.get("summary") or {}
+        if not summary:
+            # subcommand dos tidak menyediakan summary -> hitung dari findings
+            summary = {"total": len(job.findings)}
+            for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+                summary[s] = sum(1 for f in job.findings
+                                 if f.get("severity", "INFO").upper() == s)
+        job.summary = summary
         if rc in (0, 1):
             job.status = "done"
             job.progress = 100.0
             if job.findings:
                 sevs = " ".join(f"{s}:{job.summary.get(s, 0)}"
                                 for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"))
-                job.log.append(f"[UI] Scan selesai dengan {len(job.findings)} temuan ({sevs})")
+                job.log.append(f"[UI] Selesai dengan {len(job.findings)} temuan ({sevs})")
             else:
-                job.log.append("[UI] Scan selesai, tidak ada temuan.")
+                job.log.append("[UI] Selesai, tidak ada temuan.")
         else:
             job.status = "error"
-            job.error = result.get("error") or f"scan gagal (exit code {rc})"
+            job.error = result.get("error") or f"pekerjaan gagal (exit code {rc})"
         job.finished = time.time()
+
+    # uji DoS: laporan MD/HTML/PDF tidak dihasilkan subprocess -> bangun ulang
+    if job.kind == "dos" and job.status == "done":
+        try:
+            _regenerate_reports(job, ["md", "html", "pdf"])
+        except Exception:
+            pass
 
 
 def _stop_job(job: ScanJob):
@@ -392,6 +428,30 @@ def _stop_job(job: ScanJob):
             job.process.terminate()
         except Exception:
             pass
+
+
+def _regenerate_reports(job: ScanJob, formats):
+    """Bangun ulang laporan MD/HTML/PDF dari findings yang tersimpan."""
+    if not job.findings:
+        return
+    try:
+        from keris.report import write_report
+        from keris.report_html import write_html_report
+
+        recon = {"host": job.target, "stack": [], "security_headers": []}
+        disc = {"api_endpoints": [], "js_assets": [], "secrets": []}
+        options = {"mode": "Web UI Keris"}
+        out = os.path.join(job.workdir, "report.")
+        if "md" in formats:
+            write_report(recon, disc, job.findings, out + "md", job.target, options)
+        if "html" in formats:
+            write_html_report(recon, disc, job.findings, out + "html", job.target, options)
+        if "pdf" in formats:
+            from keris.report_pdf import write_pdf_report
+
+            write_pdf_report(recon, disc, job.findings, out + "pdf", job.target, options)
+    except Exception:
+        pass
 
 
 def run_ui(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
@@ -447,6 +507,10 @@ button{cursor:pointer;border:none;border-radius:8px;padding:11px 18px;
 #go{background:var(--accent);color:#fff;width:100%;margin-top:14px}
 #go:disabled{opacity:.5;cursor:not-allowed}
 #stop{background:#b91c1c;color:#fff;margin-left:8px}
+#crit{background:#7f1d1d;color:#fff}
+.fbtn{background:var(--panel2);border:1px solid var(--border);color:var(--txt);
+  padding:6px 12px;font-size:12px;font-weight:400}
+.fbtn.active{border-color:#f43f5e;color:#fda4af;font-weight:600}
 .hint{color:var(--muted);font-size:12px;margin-top:6px}
 .sev{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;
   font-weight:700;text-align:center;min-width:70px}
@@ -515,9 +579,45 @@ footer{color:var(--muted);font-size:11px;text-align:center;padding:16px}
         dijalankan pada setiap scan penuh.</div>
       <div style="display:flex;gap:8px">
         <button type="submit" id="go">MULAI SCAN</button>
+        <button type="button" id="crit">CARIKRITIKAL</button>
         <button type="button" id="stop" style="display:none">HENTIKAN</button>
       </div>
     </form>
+  </div>
+
+  <div class="card" id="panel-dos">
+    <h3 style="margin-top:0">Uji DoS (app-layer)</h3>
+    <div class="grid">
+      <div>
+        <label for="dos_type">Jenis uji</label>
+        <select id="dos_type">
+          <option value="all">Semua (slowloris + slow POST + flood)</option>
+          <option value="slowloris">Slowloris</option>
+          <option value="slowpost">Slow POST (RUDY)</option>
+          <option value="flood">Flood GET terukur</option>
+        </select>
+      </div>
+      <div>
+        <label for="dos_concurrency">Koneksi/thread bersamaan</label>
+        <input type="text" id="dos_concurrency" value="10">
+      </div>
+      <div>
+        <label for="dos_duration">Durasi (detik)</label>
+        <input type="text" id="dos_duration" value="20">
+      </div>
+      <div>
+        <label for="dos_requests">Batas total request (flood)</label>
+        <input type="text" id="dos_requests" value="200">
+      </div>
+    </div>
+    <div class="chk" style="margin-top:10px">
+      <input type="checkbox" id="dos_confirm">
+      <span style="color:#f87171">Saya punya IZIN TERTULIS dan memahami uji ini
+        membebani layanan target</span>
+    </div>
+    <button type="button" id="go_dos" style="margin-top:10px;background:#b91c1c">JALANKAN UJI DOS</button>
+    <div class="hint">Non-destruktif &amp; terukur: durasi &amp; jumlah request dibatasi.
+      Tanpa izin tertulis uji tidak akan dijalankan.</div>
   </div>
 
   <div class="card" id="panel-live" style="display:none">
@@ -530,6 +630,14 @@ footer{color:var(--muted);font-size:11px;text-align:center;padding:16px}
   <div class="card" id="panel-results" style="display:none">
     <h3 style="margin-top:0">Hasil Scan</h3>
     <div class="cards" id="sumcards"></div>
+    <div style="margin-top:10px" class="dl">
+      <b class="ver">Filter:</b>
+      <button type="button" class="fbtn" data-f="all">Semua</button>
+      <button type="button" class="fbtn" data-f="critical">Kritis</button>
+      <button type="button" class="fbtn" data-f="high">High</button>
+      <button type="button" class="fbtn" data-f="medium">Medium</button>
+      <button type="button" class="fbtn" data-f="low">Low</button>
+    </div>
     <div style="margin-top:14px" class="dl" id="downloads"></div>
     <table style="margin-top:14px" id="tbl">
       <thead><tr><th>Severity</th><th>Lokasi</th><th>Temuan</th></tr></thead>
@@ -622,10 +730,23 @@ function renderResults(j){
   if(window.filterSev){applyFilter()}
 }
 function applyFilter(){
-  const sev=window.filterSev;
+  const sev=window.filterSev||"all";
   document.querySelectorAll("#tbody tr.f").forEach(tr=>{
-    tr.classList.toggle("hidden", !(sev==="all"||tr.dataset.s===sev));
+    const s=tr.dataset.s;
+    let show;
+    if(sev==="all")show=true;
+    else if(sev==="critical")show=(s==="critical");
+    else if(sev==="high")show=(s==="high");
+    else show=(s===sev);
+    tr.classList.toggle("hidden", !show);
   });
+}
+function setFilter(sev){
+  window.filterSev=sev;
+  document.querySelectorAll(".fbtn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.f===sev);
+  });
+  applyFilter();
 }
 function SEV_ORDER(s){return {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"INFO":4}[String(s).toUpperCase()]??5}
 
@@ -683,8 +804,45 @@ $("#frm").addEventListener("submit",async e=>{
   $("#log").textContent="";
   poll(d.id);
 });
+$("#crit").addEventListener("click",async()=>{
+  // cari yang kritis: aktifkan semua modul + serangan aktif, lalu filter CRITICAL/HIGH
+  $("#authorized").checked=true;
+  ACTIVE.forEach(([k])=>{$("#a_"+k).checked=true});
+  MODULES.forEach(([k])=>{$("#m_"+k).checked=true});
+  const target=$("#target").value.trim();
+  if(!target){alert("Isi target dulu");return}
+  const r=await fetch("/api/scan",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({target,options:collectOptions()})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return}
+  window.filterSev="critical";
+  $("#panel-live").style.display="";
+  $("#log").textContent="";
+  poll(d.id);
+});
+$("#go_dos").addEventListener("click",async()=>{
+  if(!$("#dos_confirm").checked){alert("Centang konfirmasi izin tertulis terlebih dahulu");return}
+  const target=$("#target").value.trim();
+  if(!target){alert("Isi target dulu");return}
+  const options={
+    type:$("#dos_type").value,
+    concurrency:parseInt($("#dos_concurrency").value)||10,
+    duration:parseFloat($("#dos_duration").value)||20,
+    requests:parseInt($("#dos_requests").value)||200,
+  };
+  const r=await fetch("/api/dos",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({target,confirmed:true,options})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return}
+  $("#panel-live").style.display="";
+  $("#log").textContent="";
+  poll(d.id);
+});
 $("#stop").addEventListener("click",async()=>{
   if(cur)await fetch(`/api/jobs/${cur.id}/stop`,{method:"POST"});
+});
+document.querySelectorAll(".fbtn").forEach(b=>{
+  b.addEventListener("click",()=>setFilter(b.dataset.f));
 });
 fetch("/api/health").then(r=>r.json()).then(d=>{$("#ver").textContent=d.version||""});
 buildModules();

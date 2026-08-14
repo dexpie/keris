@@ -172,3 +172,46 @@ def test_check_rate_limit_no_crash_on_conn_error():
         assert f is None
     finally:
         c.close()
+
+
+def test_dos_requires_confirmation(ui_server):
+    port, _, _ = ui_server
+    status, body = _http(port, "/api/dos", "POST",
+                         {"target": "http://127.0.0.1:1", "confirmed": False,
+                          "options": {"type": "flood", "requests": 5}})
+    assert status == 400
+    assert "izin" in json.loads(body)["error"]
+
+
+def test_dos_job_runs(ui_server):
+    port, jobs, lock = ui_server
+    demo = HTTPServer(("127.0.0.1", 0), _MiniHandler)
+    dt = threading.Thread(target=demo.serve_forever, daemon=True)
+    dt.start()
+    demo_port = demo.server_address[1]
+    try:
+        status, body = _http(port, "/api/dos", "POST",
+                             {"target": f"http://127.0.0.1:{demo_port}", "confirmed": True,
+                              "options": {"type": "flood", "requests": 8,
+                                          "concurrency": 3, "duration": 1}})
+        assert status == 200
+        job_id = json.loads(body)["id"]
+        deadline = time.time() + 90
+        job = None
+        while time.time() < deadline:
+            _, body = _http(port, f"/api/jobs/{job_id}")
+            job = json.loads(body)
+            if job["status"] in ("done", "error", "stopped"):
+                break
+            time.sleep(1)
+        assert job is not None
+        assert job["status"] in ("done", "error")
+        assert job["kind"] == "dos"
+        assert isinstance(job["findings"], list)
+        # laporan regenerated dari findings harus tersedia
+        for fmt in ("md", "html", "pdf"):
+            _, body = _http(port, f"/api/jobs/{job_id}/report?fmt={fmt}")
+            assert len(body) > 0
+    finally:
+        demo.shutdown()
+        demo.server_close()

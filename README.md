@@ -12,7 +12,7 @@ Automated black-box security testing: recon → discovery → vulnerability scan
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-84%20passed-success)
+![Tests](https://img.shields.io/badge/tests-86%20passed-success)
 
 Keris is a command-line security toolkit that turns the manual workflow of a black-box web penetration test into repeatable, scriptable commands. It grew out of real engagements against production sites (Next.js/Vercel, PHP/LiteSpeed, React SPA) and is designed for pentesters, bug bounty hunters, DevOps, and AI coding agents.
 
@@ -112,6 +112,14 @@ python -m keris serve --port 9000     # custom port
 - One scan at a time; use **Hentikan** to stop
 - Active attacks (exploit/brute/CVE) only appear after ticking "Saya punya izin
   tertulis" — keep the UI bound to `127.0.0.1`; never expose it publicly.
+- **CARIKRITIKAL** button: one click runs the deepest scan (every module +
+  authorized active attacks) and auto-filters results to CRITICAL/HIGH. Use the
+  filter buttons to focus on any severity.
+- **Uji DoS** panel: app-layer DoS resilience test (slowloris / slow POST /
+  measured flood) with concurrency, duration and request caps. Requires an
+  explicit written-permission checkbox (`confirmed`) — the same guard as the
+  CLI's `--yes`. Non-destructive and measured; reports regenerated from
+  findings (MD/HTML/PDF/JSON).
 
 ---
 
