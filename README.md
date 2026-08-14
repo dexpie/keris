@@ -1,10 +1,11 @@
 # keris
 
-`keris` adalah toolkit pentest web black-box dari CLI. Isi satu URL, keris
-mengerjakan recon, discovery, scan kerentanan, sampai laporan dalam satu
-perintah. Lahir dari pengetesan nyata ke situs produksi (Next.js/Vercel,
-PHP/LiteSpeed, React SPA), jadi pilihan default-nya dibuat sopan: tidak asal
-hantam target, anti kena ban.
+`keris` is a black-box web pentest toolkit that lives in your terminal. Give it
+one URL and it runs the whole job — recon, discovery, vulnerability scanning,
+and a report — in a single command. It was born from real testing against
+production sites (Next.js/Vercel, PHP/LiteSpeed, React SPAs), so the defaults
+are polite: it doesn't hammer targets and it learns to back off when the server
+starts rate-limiting you.
 
 ```
     /\
@@ -16,231 +17,350 @@ hantam target, anti kena ban.
      ||
 ```
 
-> "Keris" itu belati Jawa. Kecil, tajam, dan tugasnya satu: uji apakah
-> sesuatu bisa ditembus. Kalau tidak, ya tidak. Datanya tetap ada di laporan.
+> "Keris" is a Javanese dagger. Small, sharp, and it does exactly one job:
+> find out whether something can be pierced. If it can't, fine. Either way,
+> the evidence lands in the report.
 
 [![PyPI](https://img.shields.io/pypi/v/keris-toolkit?color=d4a24e&label=keris-toolkit)](https://pypi.org/project/keris-toolkit)
 [![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)](https://github.com/dexpie/keris/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB)](https://www.python.org)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Isi cepat
+## Quick start
 
 ```bash
-pip install keris-toolkit        # atau: pip install -r requirements.txt
+pip install keris-toolkit
 
-# Scan penuh: recon + discovery + kerentanan + laporan Markdown
+# Full scan: recon + discovery + vulnerabilities + Markdown report
 keris scan https://example.com -o report.md
 
-# Sekalian JSON (buat CI) dan HTML
+# Same scan, JSON (for CI) + HTML
 keris scan https://example.com -o report.md \
     --json-output report.json --html report.html
 ```
 
-Coba dalam 30 detik dengan server demo yang memang sengaja bocor:
+Try it in 30 seconds against a demo server that is deliberately full of holes:
 
 ```bash
-python tests/demo_vuln_server.py        # 127.0.0.1:8099, penuh lubang
-python -m keris scan http://127.0.0.1:8099 -o demo.md --hidden-endpoints
+python tests/demo_vuln_server.py        # 127.0.0.1:8099, intentionally vulnerable
+keris scan http://127.0.0.1:8099 -o demo.md --hidden-endpoints
 ```
 
-## Ada UI-nya juga
+## Also has a web UI
 
-`serve` memunculkan halaman lokal di `http://127.0.0.1:8181`. Tempel link,
-tekan Scan. Scan berjalan di belakang, progress dan lognya streaming ke
-browser, laporan bisa diunduh dalam Markdown / HTML / PDF / JSON.
+`serve` starts a local page at `http://127.0.0.1:8181`. Paste a link, hit Scan.
+The scan runs in the background, progress and logs stream into the browser, and
+you can download the finished report as Markdown / HTML / PDF / JSON.
 
 ```bash
 python -m keris serve
 ```
 
-Dua tombol yang sering dipakai:
+Two buttons worth knowing:
 
-- **CARIKRITIKAL** - langsung menyalakan semua modul plus serangan aktif yang
-  berizin, lalu memfilter hasil ke yang CRITICAL/HIGH saja.
-- **Uji DoS** - tes ketahanan app-layer (slowloris / slow POST / flood
-  terukur) dengan batas durasi dan request. Wajib centang izin tertulis.
+- **CARIKRITIKAL** — turns on every module plus the authorized active attacks
+  at once, then filters results down to CRITICAL/HIGH only.
+- **Uji DoS** — an app-layer resilience test (slowloris / slow POST / measured
+  flood) with caps on duration and request count. It requires an explicit
+  written-permission checkbox.
 
-Satu scan per waktu, ada tombol hentikan. UI tetap di `127.0.0.1`; jangan
-pernah di-expose ke publik.
+One scan at a time, with a stop button. The UI stays bound to `127.0.0.1`;
+never expose it publicly.
 
-## Perintah
+## Commands
 
-34 subcommand. Yang sering dipakai:
+36 subcommands. The ones you'll reach for most:
 
-| Perintah | Kerjaannya |
+| Command | What it does |
 |---|---|
-| `scan` | Pipeline lengkap: recon + discovery + scan + laporan |
-| `recon` / `passive` | DNS, security headers, stack detection; passive = crt.sh + whois tanpa menyentuh target |
-| `discover` / `hidden` / `params` | Ekstraksi endpoint API, brute direktori/subdomain, cari endpoint admin/`.env`/backup, parameter tersembunyi |
-| `fuzz` / `openapi` | Fuzzing parameter ringan, import spec Swagger lalu fuzz endpointnya |
-| `jwt` / `ports` / `tls` / `dns` / `buckets` / `waf` | Token JWT, port scanner, TLS, email security (SPF/DMARC/DKIM), bucket S3/GCS publik, fingerprint WAF |
-| `crawl` / `graphql` / `smuggling` / `takeover` | Peta attack surface, testing GraphQL, request smuggling, subdomain takeover |
-| `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (termasuk password-reset poisoning), WebSocket auth & Origin |
-| `jsanalysis` / `sensitive` | Sink DOM XSS + secret di bundle JS, paparan data sensitif (kredensial/PII/kartu) |
-| `bruteforce` / `platforms` | Login lemah (form/basic), check khusus WordPress/Laravel/dll |
-| `project` | Self-audit kode sumber lokal; output JSON ramah AI agent |
-| `retest` | Diff scan lama vs baru untuk ngukur progres perbaikan |
-| `export` / `dashboard` | Temuan jadi curl/Burp XML, gabung laporan JSON jadi dashboard HTML |
-| `dos` | Uji ketahanan app-layer (khusus berizin, wajib `--yes`) |
-| `serve` | Web UI lokal |
-| `plugins` / `init` | Check kustom sendiri, contoh `keris.json` |
+| `scan` | Full pipeline: recon + discovery + vuln scan + report |
+| `recon` / `passive` | DNS, security headers, stack detection; passive = crt.sh + whois without touching the target |
+| `discover` / `hidden` / `params` | API endpoint extraction, directory/subdomain brute, admin/`.env`/backup hunting, hidden parameters |
+| `fuzz` / `openapi` | Lightweight parameter fuzzing; import a Swagger spec and fuzz its endpoints |
+| `jwt` / `ports` / `tls` / `dns` / `buckets` / `waf` | JWT analysis, TCP port scan, TLS checks, email security (SPF/DMARC/DKIM), public S3/GCS buckets, WAF fingerprinting |
+| `crawl` / `graphql` / `smuggling` / `takeover` | Attack-surface map, GraphQL testing, request smuggling, subdomain takeover |
+| `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (incl. password-reset poisoning), WebSocket auth & Origin checks |
+| `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
+| `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
+| `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
+| `retest` | Diff an old scan against a new one to track remediation progress |
+| `export` / `dashboard` | Findings to curl/Burp XML sessions; merge JSON reports into one HTML dashboard |
+| `dos` | App-layer resilience test (authorized only, `--yes` required) |
+| `serve` | Local web UI |
+| `watch` | Continuous monitoring: scheduled scans + diff + webhook alerts |
+| `tui` | Interactive terminal UI with a live progress dashboard |
+| `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 
-Semua scan default menyertakan: SQLi, XSS, SSRF, IDOR, rate-limit, directory
-listing, auth bypass, CORS, open redirect, cookie flags, TLS, security.txt,
-plus modul cache poisoning / host header / WebSocket / JS analysis / sensitive
-/ hidden endpoints / fuzz.
+Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
+directory listing, auth bypass, CORS, open redirect, cookie flags, TLS,
+security.txt, plus cache poisoning / host header / WebSocket / JS analysis /
+sensitive data / hidden endpoints / fuzz modules.
 
-## Serangan aktif
+## The overpowered stuff
 
-Modul berikut **mengirim payload**. Wajib `--authorized` (atau `--yes` untuk
-DoS) dan hanya untuk target yang Anda miliki atau punya izin tertulis.
+### Attack chains (`--chain`)
+
+A correlation engine that combines low/medium findings into critical chains,
+the way a human pentester would reason about them:
 
 ```bash
-# Auto-exploit SQLi/CMDI/SSTI/XSS (konfirmasi + exploit otomatis)
-python -m keris scan https://example.com --authorized --exploit
+keris scan https://example.com --chain
+```
+
+Examples it detects:
+
+- **Cache poisoning + reflected XSS** → CRITICAL (reflected XSS that can be
+  injected via a cacheable header becomes stored XSS for every visitor).
+- **Host header injection + password reset** → HIGH (password-reset poisoning).
+- **Auth bypass + sensitive endpoint** → CRITICAL.
+- **Weak login + admin panel** → CRITICAL (direct takeover).
+- **Directory listing + backup file** → HIGH.
+- **CORS wildcard + auth cookie** → HIGH.
+
+Chained findings carry a `"chain"` marker and `"source": "correlation"` in the
+JSON output, so they're easy to tell apart from raw findings.
+
+### AI triage + executive summary (`--triage`)
+
+An LLM (or a rule-based fallback) reviews your findings, flags false positives,
+and writes an executive summary for the report:
+
+```bash
+export KERIS_LLM_API_KEY=sk-...            # any OpenAI-compatible endpoint
+keris scan https://example.com --triage
+```
+
+- Without a key, a local heuristic still demotes demo/test artifacts and keeps
+  the executive summary.
+- With a key (or `KERIS_LLM_BASE_URL` for a self-hosted endpoint), CRITICAL and
+  HIGH findings are reviewed by the model; verdicts are written back as a
+  `triage` object on each finding.
+- The executive summary is embedded in the JSON report as
+  `executive_summary` and flows into the Markdown report.
+
+### Headless browser (`--browser`)
+
+Renders JS-heavy targets with Playwright and looks at the *real* DOM, not the
+raw HTML:
+
+```bash
+pip install playwright && python -m playwright install chromium
+keris scan https://example.com --browser --screenshot evidence.png
+```
+
+- Runs the page, waits for `networkidle`, scans the rendered DOM for DOM XSS
+  sinks (`innerHTML`, `eval`, `document.write`, ...) and leaked secrets.
+- `--screenshot` captures full-page evidence.
+- Reuses your `--login-username` / `--login-password` to run the pass while
+  authenticated.
+- Gracefully skips with a hint if Playwright isn't installed — the rest of the
+  toolkit keeps working.
+
+### Auto-ticketing (`--ticket`)
+
+Turn findings into GitHub Issues or Jira tickets automatically:
+
+```bash
+# GitHub
+export GITHUB_TOKEN=ghp_... KERIS_GITHUB_REPO=your/repo
+keris scan https://example.com --ticket github
+
+# Jira
+export JIRA_BASE_URL=https://your.atlassian.net JIRA_EMAIL=you@x.com \
+       JIRA_API_TOKEN=... JIRA_PROJECT=SEC
+keris scan https://example.com --ticket jira --ticket-project SEC
+```
+
+One ticket per finding at or above `--ticket-min` (default `HIGH`), each with
+severity, endpoint, evidence, and an auto-generated remediation suggestion.
+Triage-demoted findings are skipped. You can also configure these in
+`keris.json` under `github` / `jira` blocks.
+
+### Continuous monitoring (`watch`)
+
+Schedule repeated scans, diff each one against the previous run, and alert when
+new CRITICAL/HIGH findings appear:
+
+```bash
+keris watch https://example.com --interval 3600 --webhook <slack-url>
+```
+
+- State is kept in `--state-dir` (default `.keris-watch/`): `latest.json` and
+  `previous.json`.
+- Per cycle it reports new / fixed / persisting counts, plus a
+  `alertable_new` figure for severity above `--min-severity`.
+- Alerts go to Slack / Discord / Telegram webhooks.
+- Perfect under cron: `0 */6 * * * keris watch https://app.example.com --interval 3600`.
+- Exit code 1 when a cycle found alertable findings — usable as a CI check.
+
+### Interactive TUI (`tui`)
+
+A terminal dashboard that streams the scan live — progress bar, current stage,
+and the latest log lines — with no extra dependencies (pure ANSI, works on
+Windows Terminal too):
+
+```bash
+keris tui https://example.com
+```
+
+## Active attacks
+
+These modules **send payloads**. They require `--authorized` (or `--yes` for
+DoS) and are only for targets you own or have written permission to test.
+
+```bash
+# Auto-exploit SQLi/CMDI/SSTI/XSS (confirms + exploits)
+keris scan https://example.com --authorized --exploit
 
 # Extended brute + username enumeration
-python -m keris bruteforce https://app.example.com --authorized --extended
+keris bruteforce https://app.example.com --authorized --extended
 
-# CVE/PoC probe sesuai platform yang terdeteksi
-python -m keris scan https://example.com --authorized --exploit-cve
+# CVE/PoC probes based on detected platform
+keris scan https://example.com --authorized --exploit-cve
 ```
 
-## Autentikasi
+## Authentication
 
-Bearer token, cookie session, basic auth, sampai auto-login lewat form HTML
-(sesi ditangkap untuk seluruh scan):
+Bearer token, session cookie, basic auth, or full HTML form auto-login (the
+session is captured for the whole scan):
 
 ```bash
-python -m keris scan https://app.example.com --token eyJhbGciOi...
-python -m keris scan https://app.example.com --cookie "session=abc123"
-python -m keris scan https://app.example.com --login-username admin --login-password hunter2
-python -m keris scan https://example.com --proxy http://127.0.0.1:8080
+keris scan https://app.example.com --token eyJhbGciOi...
+keris scan https://app.example.com --cookie "session=abc123"
+keris scan https://app.example.com --login-username admin --login-password hunter2
+keris scan https://example.com --proxy http://127.0.0.1:8080
 ```
 
-## Laporan
+## Reports
 
-Setiap temuan diberi **skor CVSS v3.1** (vektor + base score) dan kategori
-**OWASP Top 10 (2021)**. Laporan Markdown menyerupai laporan pentest manual:
-ringkasan eksekutif, tabel severitas, profil target, security headers, temuan
-lengkap dengan bukti, lalu rekomendasi.
+Every finding gets a **CVSS v3.1 score** (vector + base) and an **OWASP Top 10
+(2021)** category. The Markdown report reads like a manual pentest report:
+executive summary, severity table, target profile, security headers, findings
+with evidence, then recommendations.
 
 ```bash
-python -m keris scan https://example.com -o report.md \
+keris scan https://example.com -o report.md \
     --html report.html --pdf report.pdf --json-output out.json
 ```
 
-Lainnya:
+Also available:
 
-- **Retest**: `keris retest jan.json feb.json -o retest.md` mengelompokkan
-  temuan jadi fixed / new / persisting dan mencetak persentase progres.
-  Exit code bukan nol kalau masih ada yang baru atau belum diperbaiki, jadi
-  bisa jadi gerbang CI "apakah fix-nya sudah landed?".
-- **Export**: temuan jadi script curl atau session Burp XML.
-- **Dashboard**: gabung beberapa `--json-output` jadi satu HTML.
-- **Webhook**: Slack / Discord / Telegram.
-- **Exit code**: `0` bersih, `1` ada temuan >= threshold (`--exit-on`, default
-  high), `2` error.
+- **Retest**: `keris retest jan.json feb.json -o retest.md` groups findings
+  into fixed / new / persisting and prints a remediation progress percentage.
+  Non-zero exit when anything remains — usable as a "has the fix landed?" CI
+  gate.
+- **Export**: findings to curl scripts or Burp XML sessions.
+- **Dashboard**: merge multiple `--json-output` files into one HTML.
+- **Webhook**: Slack / Discord / Telegram notifications.
+- **Exit codes**: `0` clean, `1` a finding at/above `--exit-on` (default
+  `high`), `2` error.
 
-## Kebiasaan yang sudah dibangun-in
+## Built-in good behaviour
 
-- **Sopan secara default**: preset `fast` / `stealth` / `aggressive`, delay,
-  workers, dan backoff adaptif saat deteksi 429/403. Scan tidak asal ngebut
-  biar IP Anda tidak kena blokir.
-- **Rate-limit aware**: retry tidak pernah untuk HTTP 5xx, supaya SQLi
-  berbasis error tidak tertutupi.
-- **Konfigurasi via `keris.json`**: `python -m keris init` untuk contoh; flag
-  CLI selalu menang atas file.
+- **Polite by default**: `fast` / `stealth` / `aggressive` presets, delay,
+  workers, and adaptive backoff on 429/403. Scans don't blindly speed up and
+  get your IP banned.
+- **Rate-limit aware**: never retries HTTP 5xx on purpose, so error-based SQLi
+  isn't masked.
+- **Configuration via `keris.json`**: `keris init` writes an example; CLI flags
+  always win over the file.
 
-## Instalasi
+## Installation
 
 ```bash
-pip install keris-toolkit         # cukup. semua dependensi ikut.
+pip install keris-toolkit         # everything you need, bundled
 keris --help
 
-# Dari source (buat development):
+# From source (for development):
 git clone https://github.com/dexpie/keris.git
 cd keris
-pip install -e ".[dev]"           # + dependensi test
+pip install -e ".[dev]"           # + test dependencies
 ```
 
-Dependensi: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi, requests, websocket-client.
+Dependencies: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi,
+requests, websocket-client. Optional: `playwright` (browser pass) and an LLM
+key (AI triage).
 
-Docker juga bisa:
+Docker also works:
 
 ```bash
 docker build -t keris .
 docker run --rm -v "$PWD:/work" keris scan https://example.com -o /work/report.md
 ```
 
-## Kerja dengan Keris
+## Working with Keris
 
 ```bash
-python -m keris scan https://example.com --exit-on high     # CI gate
-python -m keris scan --targets targets.txt --json-output all.json  # banyak target
-python -m keris scan https://example.com --no-discover --no-bruteforce --no-plugins
+keris scan https://example.com --exit-on high     # CI gate
+keris scan --targets targets.txt --json-output all.json  # many targets
+keris scan https://example.com --no-discover --no-bruteforce --no-plugins
+keris scan https://example.com --chain --triage --browser   # go big
 
 # Development
 python -m pytest tests -q
 ruff check keris tests
 ```
 
-### Scan otomatis tiap PR
+### Auto-scan on every PR
 
-Tersedia workflow contoh di `.github/workflows/scan-pr.yml`. Cara pakainya:
-tulis `https://url-target` di body PR (atau komentar `/scan <url>`), workflow
-menginstall `keris-toolkit`, menjalankan scan, lalu mengomentari ringkasan
-temuan di PR. Artifact laporan lengkap ikut tersimpan.
+A ready-made workflow lives in `.github/workflows/scan-pr.yml`. Put a
+`https://url` in the PR body (or comment `/scan <url>`), and the workflow
+installs `keris-toolkit`, runs the scan, posts a summary comment to the PR, and
+uploads the full report as an artifact.
 
-## Struktur
+## Structure
 
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (34 subcommand)
-│   ├── payloads.py        # payload SQLi/XSS/SSRF/CMDI/SSTI + daftar wordlist
+│   ├── __main__.py        # CLI (36 subcommands)
+│   ├── payloads.py        # SQLi/XSS/SSRF/CMDI/SSTI payloads + wordlists
 │   ├── cvss.py            # CVSS v3.1 scoring + OWASP mapping
 │   ├── report*.py         # Markdown / HTML / PDF / dashboard
-│   ├── ui.py              # web UI lokal (http.server, tanpa dependensi)
+│   ├── ui.py              # local web UI (stdlib http.server, zero deps)
 │   ├── core/              # http client (auth, proxy, backoff), config, logger, utils
-│   ├── modules/           # 30+ scanner: recon sampai dos, exploit, plugins
-│   └── data/              # wordlist direktori & subdomain
-├── plugins/               # contoh plugin (Python + JSON)
-├── tests/                 # pytest suite + server demo yang sengaja bocor
+│   └── modules/           # scanners + correlation, triage, browser, ticketing, watch, tui
+├── plugins/               # example plugins (Python + JSON)
+├── tests/                 # pytest suite + intentionally-vulnerable demo server
 ├── Dockerfile
 └── docker-compose.yml
 ```
 
 ## Roadmap
 
-- [x] Pipeline scan penuh + laporan
-- [x] Passive recon, form auto-login, fuzzing, preset kecepatan
+- [x] Full scan pipeline + reports
+- [x] Passive recon, form auto-login, fuzzing, speed presets
 - [x] JWT, port scan, OpenAPI, brute-force, platform checks
-- [x] Project self-audit (untuk AI agent)
-- [x] Wayback, DNS/email security, bucket cloud, TLS
-- [x] WAF, hidden parameter, export curl/Burp, webhook, dashboard
-- [x] DoS resilience test (authorized-only)
-- [x] Hidden endpoint, crawler, GraphQL
+- [x] Project self-audit (for AI agents)
+- [x] Wayback, DNS/email security, cloud buckets, TLS
+- [x] WAF, hidden parameters, curl/Burp export, webhooks, dashboard
+- [x] DoS resilience test (authorized only)
+- [x] Hidden endpoints, crawler, GraphQL
 - [x] Subdomain takeover & request smuggling
 - [x] Auto-exploit + CVE probes (authorized only)
 - [x] Cache poisoning, host header, WebSocket, JS analysis
 - [x] Sensitive data scan, retest workflow
-- [x] CVSS + OWASP di semua format laporan
-- [x] Web UI dengan scan satu-klik dan uji DoS
+- [x] CVSS + OWASP in every report format
+- [x] Web UI with one-click scan and DoS testing
+- [x] **Attack-chain correlation engine (`--chain`)**
+- [x] **AI triage + executive summary (`--triage`)**
+- [x] **Headless browser pass with screenshots (`--browser`)**
+- [x] **Auto-ticketing to GitHub/Jira (`--ticket`)**
+- [x] **Continuous monitoring (`watch`)**
+- [x] **Interactive terminal UI (`tui`)**
 
-## Catatan legal
+## Legal note
 
-Gunakan hanya pada sistem yang Anda miliki atau yang sudah memberi izin
-tertulis. Modul serangan aktif (exploit, CVE, brute-force extended, DoS) wajib
-konfirmasi eksplisit. Semua risiko ada di pemakai.
+Use only on systems you own or that have given you written permission. Active
+attack modules (exploit, CVE, brute-force extended, DoS) require explicit
+confirmation. All responsibility lies with the user.
 
 ---
 
-[MIT](LICENSE) - pakai, pelajari, perbaiki. Kontribusi dipersilakan, lihat
-[CONTRIBUTING.md](CONTRIBUTING.md). Cari celah keamanan di Keris sendiri?
-Lapor lewat [SECURITY.md](SECURITY.md).
+[MIT](LICENSE) — use it, learn from it, improve it. Contributions welcome; see
+[CONTRIBUTING.md](CONTRIBUTING.md). Found a security hole in Keris itself?
+Report it via [SECURITY.md](SECURITY.md).
 
-Keris dibangun untuk pentester, bug bounty hunter, DevOps, dan AI coding agent
-yang mau hasil konsisten tanpa harus menghafal 30 tool berbeda. Kalau ada
-tanggapan atau permintaan fitur, jangan ragu.
+Keris is built for pentesters, bug bounty hunters, DevOps, and AI coding agents
+who want consistent results without juggling thirty separate tools. Feedback
+and feature requests are always welcome.
