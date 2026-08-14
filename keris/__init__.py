@@ -9,7 +9,7 @@ def _version() -> str:
     try:
         return metadata.version("keris-toolkit")
     except metadata.PackageNotFoundError:
-        return "0.4.0"
+        return "0.4.1"
 
 
 __version__ = _version()

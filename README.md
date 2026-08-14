@@ -69,7 +69,7 @@ never expose it publicly.
 
 ## Commands
 
-36 subcommands. The ones you'll reach for most:
+37 subcommands. The ones you'll reach for most:
 
 | Command | What it does |
 |---|---|
@@ -89,6 +89,7 @@ never expose it publicly.
 | `serve` | Local web UI |
 | `watch` | Continuous monitoring: scheduled scans + diff + webhook alerts |
 | `tui` | Interactive terminal UI with a live progress dashboard |
+| `hunt` | Credential hunting: `.git` dump, `.env`/backup files, cloud secrets |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
@@ -202,6 +203,46 @@ Windows Terminal too):
 ```bash
 keris tui https://example.com
 ```
+
+### Credential hunting (`hunt`)
+
+Hunts the way an attacker would harvest credentials, and can be wired into any
+full scan with `--hunt`:
+
+```bash
+keris hunt https://example.com --json-output hunt.json
+keris scan https://example.com --hunt
+```
+
+What it checks:
+
+- **`.git` exposure** — probes `/.git/HEAD`, `/.git/config`, `/.git/index`, and
+  parses the git index binary to reconstruct the file layout (filename
+  disclosure). A dumpable `.git` means the whole source tree may be recoverable
+  offline — flagged CRITICAL. `/.git/config` leaks the remote repo URL.
+- **Config & backup files** — `.env`, `.env.*`, `wp-config.php`, `config.*`,
+  `*.bak`, `dump.sql`, and ~25 more, with a secret check on the contents.
+- **Cloud & app secrets** — AWS access keys, Google API keys / OAuth client
+  secrets, GitHub and Slack tokens, OpenAI keys, plus generic password / API
+  key patterns across pages and JS bundles.
+- **`--verify`** — sends a single metadata request to AWS
+  (`GetAccessKeyLastUsed`) to check whether a discovered AWS key is live.
+
+Credentials are redacted in reports (`AKIA…MPLE`); full values never hit the
+console or JSON output.
+
+### Brutal DoS (`--hammer`)
+
+`dos` gains a brutal mode that runs slowloris + slow POST + flood
+**simultaneously** (3× threads) with your chosen caps:
+
+```bash
+keris dos https://example.com --yes --hammer --concurrency 50 --duration 60
+```
+
+Same safety rails as normal DoS — `--yes` is mandatory and it never runs
+against a target you don't have written permission to test. After the hammer it
+checks whether the service still answers and reports a HIGH finding if not.
 
 ## Active attacks
 
@@ -348,6 +389,8 @@ keris/
 - [x] **Auto-ticketing to GitHub/Jira (`--ticket`)**
 - [x] **Continuous monitoring (`watch`)**
 - [x] **Interactive terminal UI (`tui`)**
+- [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
+- [x] **Brutal multi-vector DoS (`dos --hammer`)**
 
 ## Legal note
 

@@ -88,6 +88,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--ticket-project", help="Project key Jira untuk auto-ticketing")
     ps.add_argument("--ticket-min", default="HIGH", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
                     help="Severity minimum untuk auto-ticketing (default: HIGH)")
+    ps.add_argument("--hunt", action="store_true",
+                    help="Jalankan credential hunting (.git, .env/backup, secret cloud) dalam scan")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
@@ -324,6 +326,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pdo.add_argument("--port", type=int, help="Port untuk slowloris (default: dari skema URL)")
     pdo.add_argument("--yes", action="store_true",
                      help="KONFIRMASI izin tertulis untuk menjalankan beban nyata")
+    pdo.add_argument("--hammer", action="store_true",
+                     help="Mode brutal: jalankan semua vektor serentak dengan concurrency & cap tinggi "
+                          "(slowloris + slow POST + flood paralel). HANYA dengan --yes")
     pdo.add_argument("--json-output", help="File output JSON")
 
     # serve (Web UI lokal)
@@ -353,6 +358,15 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ptu.add_argument("target", help="URL target")
     ptu.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     ptu.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # hunt (credential hunting)
+    phu = sub.add_parser("hunt", parents=[common],
+                         help="Credential hunting: .git dump, .env/backup, secret cloud key")
+    phu.add_argument("--json-output", help="File output JSON")
+    phu.add_argument("--verify", action="store_true",
+                     help="Verifikasi AWS key yang ditemukan terhadap endpoint publik AWS")
+    phu.add_argument("--asset", action="append", default=[],
+                     help="URL aset tambahan untuk scan secret (bisa diulang)")
 
     return p.parse_args(argv)
 
@@ -692,6 +706,21 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                            authorized=authorized):
             findings.append(f.to_dict())
             severity(f.severity, f"{f.title}: {f.endpoint}")
+
+    # credential hunting (opsional): .git, .env/backup, secret cloud
+    if getattr(args, "hunt", False):
+        info("=== HUNT ===")
+        from keris.modules.hunt import run_hunt
+
+        try:
+            hunt_assets = disc.get("js_assets", [])[:20]
+            hfindings = run_hunt(base, client, verify=getattr(args, "verify", False),
+                                 extra_urls=hunt_assets)
+            findings.extend(hfindings)
+            for f in hfindings:
+                severity(f["severity"], f"{f['title']}: {f['endpoint']}")
+        except Exception as e:
+            warn(f"Hunt gagal: {e}")
 
     # headless browser pass (opsional): render JS + DOM XSS + screenshot
     if getattr(args, "browser", False):
@@ -1510,19 +1539,47 @@ def _cmd_dos(args, cfg, overrides) -> int:
 
     targets = _resolve_targets(args)
     all_findings = []
+    hammer = getattr(args, "hammer", False)
     for target in targets:
         base = normalize_url(target)
         client = _make_client(args, cfg, overrides)
         try:
-            all_findings.extend(run_dos_test(
-                base, client,
-                kind=args.type,
-                concurrency=args.concurrency,
-                duration=args.duration,
-                total=args.requests,
-                port=getattr(args, "port", None),
-                confirmed=True,
-            ))
+            if hammer:
+                # mode brutal: semua vektor serentak dengan cap tinggi
+                from keris.modules.dos import run_dos_test as _run
+                from keris.modules.dos import run_hammer
+                from keris.modules.scanner import Finding
+
+                warn("HAMMER mode: seluruh vektor serentak. Pastikan izin tertulis penuh.")
+                results = run_hammer(
+                    base, client,
+                    concurrency=args.concurrency,
+                    duration=args.duration,
+                    total=args.requests,
+                    port=getattr(args, "port", None),
+                )
+                for name, stats in results["vectors"].items():
+                    ok(f"HAMMER {name}: {stats.get('sent', 0)} paket/request, "
+                       f"{stats.get('errors', 0)} error")
+                all_findings.append(Finding(
+                    results["alive"] and "INFO" or "HIGH",
+                    "HAMMER DoS: semua vektor serentak",
+                    base,
+                    "Mode brutal menjalankan slowloris + slow POST + flood secara "
+                    "paralel. " + ("Layanan tetap responsif." if results["alive"]
+                                   else "Layanan tidak responsif setelah hammer!"),
+                    f"vectors={list(results['vectors'])}",
+                ))
+            else:
+                all_findings.extend(run_dos_test(
+                    base, client,
+                    kind=args.type,
+                    concurrency=args.concurrency,
+                    duration=args.duration,
+                    total=args.requests,
+                    port=getattr(args, "port", None),
+                    confirmed=True,
+                ))
         finally:
             client.close()
 
@@ -1590,6 +1647,30 @@ def _cmd_tui(args, cfg, overrides) -> int:
            os.path.join(outdir, "report.md")]
     rc = run_tui(base, cmd)
     return rc if rc in (0, 1) else EXIT_ERROR
+
+
+def _cmd_hunt(args, cfg, overrides) -> int:
+    from keris.modules.hunt import run_hunt
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(run_hunt(base, client, verify=args.verify,
+                                         extra_urls=args.asset))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({
+                "tool": "keris", "version": __version__,
+                "command": "hunt",
+                "findings": all_findings,
+            }, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
 
 
 def _cmd_export(args, cfg, overrides) -> int:
@@ -1721,6 +1802,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_watch(args, cfg, overrides)
         if args.command == "tui":
             return _cmd_tui(args, cfg, overrides)
+        if args.command == "hunt":
+            return _cmd_hunt(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

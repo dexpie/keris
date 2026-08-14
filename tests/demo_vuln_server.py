@@ -59,6 +59,35 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             self._send(200, b"SECRET_DATA_PLACEHOLDER", "application/octet-stream")
             return
 
+        if path == "/.git/HEAD":
+            self._send(200, b"ref: refs/heads/main\n", "text/plain")
+            return
+
+        if path == "/.git/config":
+            self._send(200, b"[core]\n\turl = https://github.com/acme/secret-repo.git\n", "text/plain")
+            return
+
+        if path == "/.git/index":
+            # DIRC header: version 2, 2 entries, then padded entries
+            import struct
+
+            entries = [
+                (b"config/credentials.json", b"a" * 20),
+                (b"src/app/secrets.py", b"b" * 20),
+            ]
+            data = b"DIRC" + struct.pack(">II", 2, len(entries))
+            for name, sha in entries:
+                header = struct.pack(">IIIIIIIIII", 0, 0, 0, 0, 0o100644, 0, 0, 0, 0, 0) + sha + struct.pack(">H", len(name))
+                entry = header + name + b"\x00"
+                pad = (8 - len(entry) % 8) % 8
+                data += entry + b"\x00" * pad
+            self._send(200, data, "application/octet-stream")
+            return
+
+        if path == "/.env":
+            self._send(200, b"DB_PASSWORD='sup3rsecret123'\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n", "text/plain")
+            return
+
         if path == "/admin":
             self._send(200, json.dumps({"admin_panel": True, "secret": "ADMIN_SECRET_XYZ"}).encode())
             return
