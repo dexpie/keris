@@ -8,7 +8,7 @@ import requests
 
 from keris.core.http import KerisHTTP
 from keris.core.logger import info, ok, warn, debug
-from keris.core.utils import add_query, extract_urls, host_from_url, normalize_url, set_query_param
+from keris.core.utils import extract_urls, host_from_url, normalize_url, set_query_param
 from keris.payloads import SQLI_ERROR, SQLI_TIME, XSS_PAYLOADS, SSRF_TARGETS
 
 FINDING_LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
@@ -78,7 +78,7 @@ def scan_sqli(client: KerisHTTP, url: str, param: str, time_delay: float = 5.0) 
     for _ in range(2):
         t0 = time.monotonic()
         try:
-            client.get(add_query(url, **{param: base_val or "1"}), timeout=15)
+            client.get(set_query_param(url, param, base_val or "1"), timeout=15)
         except requests.RequestException:
             pass
         base_times.append(time.monotonic() - t0)
@@ -92,7 +92,7 @@ def scan_sqli(client: KerisHTTP, url: str, param: str, time_delay: float = 5.0) 
 
     for payload in SQLI_ERROR:
         try:
-            r = client.get(add_query(url, **{param: payload}), timeout=15)
+            r = client.get(set_query_param(url, param, payload), timeout=15)
             body = r.text[:4000].lower()
             if any(sig in body for sig in error_signatures):
                 findings.append(Finding(
@@ -107,7 +107,7 @@ def scan_sqli(client: KerisHTTP, url: str, param: str, time_delay: float = 5.0) 
     # time-based
     t0 = time.monotonic()
     try:
-        client.get(add_query(url, **{param: SQLI_TIME[0]}), timeout=time_delay + 5)
+        client.get(set_query_param(url, param, SQLI_TIME[0]), timeout=time_delay + 5)
         elapsed = time.monotonic() - t0
         if elapsed >= time_delay * 0.9:
             findings.append(Finding(
@@ -126,7 +126,7 @@ def scan_xss(client: KerisHTTP, url: str, param: str) -> List[Finding]:
     findings = []
     for payload in XSS_PAYLOADS:
         try:
-            r = client.get(add_query(url, **{param: payload}), timeout=15)
+            r = client.get(set_query_param(url, param, payload), timeout=15)
             if payload in r.text:
                 # cek apakah dalam konteks yang bisa dieksekusi (tidak di-escape)
                 findings.append(Finding(

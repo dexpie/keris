@@ -1,72 +1,151 @@
-"""WAF detection & fingerprinting: identifikasi Web Application Firewall."""
+"""Deteksi & fingerprinting WAF (Web Application Firewall).
 
+Mengirimkan request polos + payload berbahaya umum, lalu mencocokkan
+header/cookie/error page/challenge dengan tanda tangan WAF populer.
+"""
+
+import re
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
-import requests
+from ..core.logger import debug, info, ok, warn
 
-from keris.core.http import KerisHTTP
-from keris.core.logger import debug, info, ok, warn
+# tanda tangan per vendor WAF
+SIGNATURES = {
+    "Cloudflare": {
+        "headers": [r"cf-ray", r"server:\s*cloudflare", r"__cfduid", r"cf-cache-status"],
+        "body": [r"attention required!? ?cloudflare", r"cf-error-details", r"cloudflare ray id"],
+    },
+    "AWS WAF / CloudFront": {
+        "headers": [r"x-amzn-requestid", r"awswaf-token", r"x-cache:.*cloudfront"],
+        "body": [r"request blocked", r"403 ERROR"],
+    },
+    "Akamai Ghost": {
+        "headers": [r"akamai", r"x-akamai-", r"ak_bmsc", r"bm_sz"],
+        "body": [r"akamai", r"ghost watermarked"],
+    },
+    "Sucuri CloudProxy": {
+        "headers": [r"x-sucuri-", r"sucuri"],
+        "body": [r"sucuri web site firewall", r"cloudproxy"],
+    },
+    "ModSecurity / OWASP CRS": {
+        "headers": [r"mod_security", r"x-modsec", r"sec-request"],
+        "body": [r"modsecurity", r"not acceptable", r"owasp"],
+    },
+    "F5 BIG-IP ASM": {
+        "headers": [r"x-wa-info", r"x-cnection", r"f5", r"bigip"],
+        "body": [r"the requested url was rejected", r"support id"],
+    },
+    "Imperva Incapsula": {
+        "headers": [r"x-cdn: incapsula", r"incap_ses", r"visid_incap"],
+        "body": [r"incapsula", r"contact support for\s*information"],
+    },
+    "Fortinet FortiWeb": {
+        "headers": [r"fortiwaf", r"x-request-uri", r"fortiwafsid"],
+        "body": [r"fortiweb", r"top page: \d+"],
+    },
+    "Barracuda WAF": {
+        "headers": [r"barracuda", r"x-barracuda-"],
+        "body": [r"barracuda", r"blocked by barracuda"],
+    },
+    "Wordfence": {
+        "headers": [r"wf-", r"wordfence"],
+        "body": [r"wordfence", r"wordfence blocked"],
+    },
+    "Radware AppWall": {
+        "headers": [r"radware", r"appwall"],
+        "body": [r"appwall", r"request blocked by appwall"],
+    },
+    "Citrix NetScaler": {
+        "headers": [r"x-ns-", r"ns_af", r"citrix"],
+        "body": [r"citrix", r"blocked by netscaler"],
+    },
+}
 
-# Pola identifikasi: (nama, header yang dicocokkan, nilai, body signature)
-WAF_SIGNATURES = [
-    ("Cloudflare", ["server"], "cloudflare",
-     ["cf-ray", "__cf_bm", "__cfduid", "cf_chl"]),
-    ("AWS WAF / CloudFront", ["server"], "cloudfront",
-     ["x-amz-cf-id", "x-amz-cf-pop", "AWSALB", "awswaf"]),
-    ("Sucuri", ["server"], "sucuri", ["sucuri", "X-Sucuri-ID"]),
-    ("Akamai", ["server"], "akamai", ["akamai", "AkamaiGHost"]),
-    ("Imperva / Incapsula", ["server"], "incapsula", ["incap_ses", "X-Iinfo", "visid_incap"]),
-    ("F5 BIG-IP ASM", ["server"], "big-ip", ["F5-Traffic-Shapes", "BIGipServer"]),
-    ("ModSecurity (OWASP CRS)", ["server"], "mod_security", ["mod_security", "OWASP_CRS"]),
-    ("Barracuda", ["server"], "barracuda", ["barracuda"]),
-    ("Fastly", ["server"], "fastly", ["x-fastly", "Fastly-SSL"]),
-    ("Varnish", ["server"], "varnish", ["x-varnish"]),
-    ("Wordfence", ["server"], "wordfence", ["wfWAF", "wordfence"]),
-    ("Comodo / cWatch", ["server"], "comodo", ["cwatch", "comodo"]),
+# payload berbahaya umum untuk memicu blokir WAF
+PROBE_PAYLOADS = [
+    "' OR 1=1 --",
+    "<script>alert(1)</script>",
+    "../../../../etc/passwd",
+    "1' UNION SELECT @@version--",
+    "<iframe src=javascript:alert(1)>",
+    "cat /etc/passwd",
 ]
 
 
-def detect_waf(base: str, client: KerisHTTP, timeout: float = 15.0) -> Dict:
-    """Deteksi WAF dari header respons dan body block page."""
-    info("Deteksi WAF ...")
-    result = {"waf": None, "evidence": [], "blocked": False}
+def _signature_hits(resp, body: str) -> List[str]:
+    headers = "\n".join(f"{k}: {v}" for k, v in resp.headers.items()).lower()
+    body_l = body.lower()
+    hits = []
+    for vendor, sig in SIGNATURES.items():
+        if any(re.search(p, headers) for p in sig["headers"]) or \
+           any(re.search(p, body_l) for p in sig["body"]):
+            hits.append(vendor)
+    return hits
 
+
+def detect_waf(base: str, client, timeout: float = 10.0) -> Dict:
+    """Deteksi WAF pada target.
+
+    Returns dict: {present, vendors, blocked_payloads, details}.
+    """
+    parsed = urlparse(base)
+    path = parsed.path or "/"
+    result = {
+        "present": False,
+        "vendors": [],
+        "blocked_payloads": [],
+        "details": [],
+        "probe_url": base,
+    }
+
+    # 1) baseline request polos
     try:
-        r = client.get(base, timeout=timeout)
-    except requests.RequestException as e:
-        result["evidence"].append(f"request failed: {e}")
+        r0 = client.get(base, timeout=timeout)
+        body0 = r0.text
+        hits = _signature_hits(r0, body0)
+        if hits:
+            result["present"] = True
+            result["vendors"].extend(hits)
+            result["details"].append("tanda tangan terlihat pada respons polos")
+    except Exception as e:
+        result["details"].append(f"baseline gagal: {e}")
         return result
 
-    headers = {k.lower(): v for k, v in r.headers.items()}
-    body = r.text[:4000].lower()
+    # 2) payload berbahaya
+    for payload in PROBE_PAYLOADS:
+        import urllib.parse as up
+        url = base if "?" in base else base + ("/" if not path.endswith("/") else "")
+        url = url + "?q=" + up.quote(payload)
+        try:
+            r = client.get(url, timeout=timeout)
+            body = r.text
+            if r.status_code in (403, 406, 429, 503) or "challenge" in body.lower() \
+                    or "captcha" in body.lower() or "blocked" in body.lower():
+                result["blocked_payloads"].append(payload)
+            hits = _signature_hits(r, body)
+            if hits:
+                result["present"] = True
+                for v in hits:
+                    if v not in result["vendors"]:
+                        result["vendors"].append(v)
+        except Exception:
+            continue
 
-    # 1. cocokkan signature dari header
-    matched = set()
-    for name, hdr_keys, value, body_markers in WAF_SIGNATURES:
-        hdr_key = hdr_keys[0] if isinstance(hdr_keys, list) else hdr_keys
-        hdr_val = str(headers.get(hdr_key, "")).lower()
-        hits = []
-        if value in hdr_val:
-            hits.append(f"{hdr_key}: {hdr_val}")
-        for marker in body_markers:
-            if marker.lower() in body or marker.lower() in hdr_val:
-                hits.append(marker)
-        if hits:
-            matched.add(name)
-            result["evidence"].append(f"{name}: {hits[0]}")
-
-    # 2. tanda block page umum
-    block_signals = ["access denied", "blocked", "request rejected", "cf-error",
-                     "challenge", "attention required", "waf", "threat",
-                     "403 forbidden"]
-    if any(s in body for s in block_signals) and r.status_code in (403, 429, 503):
-        result["blocked"] = True
-        result["evidence"].append(f"block page: status {r.status_code}")
-
-    if matched:
-        result["waf"] = ", ".join(sorted(matched))
-        ok(f"WAF terdeteksi: {result['waf']}")
-    else:
-        debug("WAF tidak terdeteksi dari signature umum")
+    result["vendors"] = list(dict.fromkeys(result["vendors"]))
+    if result["blocked_payloads"]:
+        result["present"] = True
+        result["details"].append(f"{len(result['blocked_payloads'])} payload diblokir/challenge")
 
     return result
+
+
+def waf_finding(result: Dict) -> Optional[Dict]:
+    if not result["present"]:
+        return None
+    return {
+        "severity": "INFO",
+        "title": "WAF terdeteksi: " + (", ".join(result["vendors"]) or "Unknown"),
+        "endpoint": result["probe_url"],
+        "evidence": "; ".join(result["details"]),
+    }

@@ -117,6 +117,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Cek keamanan endpoint WebSocket (butuh websocket-client)")
     ps.add_argument("--js-analysis", action="store_true",
                     help="Analisis bundle JS untuk DOM XSS sinks & secret")
+    ps.add_argument("--ssrf", action="store_true",
+                    help="Deteksi SSRF via callback listener (out-of-band) pada tiap parameter")
     ps.add_argument("--sensitive-data", action="store_true",
                     help="Scan paparan data sensitif (kredensial/PII/kartu)")
 
@@ -595,15 +597,15 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
 
     # WAF detection (opsional)
     if getattr(args, "waf", False):
-        from keris.modules.waf import detect_waf
+        from keris.modules.waf import detect_waf, waf_finding
 
-        waf = detect_waf(base, client)
-        if waf.get("waf"):
-            findings.append({
-                "severity": "INFO", "title": "WAF terdeteksi",
-                "endpoint": base, "detail": f"Web Application Firewall: {waf['waf']}",
-                "evidence": ", ".join(waf.get("evidence", []))[:500],
-            })
+        waf_res = detect_waf(base, client)
+        wf = waf_finding(waf_res)
+        if wf:
+            findings.append(wf)
+            severity(wf["severity"], f"{wf['title']}: {wf['endpoint']}")
+        elif waf_res.get("details"):
+            info("WAF tidak terdeteksi: " + "; ".join(waf_res["details"][:2]))
 
     # TLS certificate analysis (opsional)
     if getattr(args, "tls_cert", False):
@@ -736,6 +738,36 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                 severity(f["severity"], f"{f['title']}: {f['endpoint']}")
         except Exception as e:
             warn(f"Hunt gagal: {e}")
+
+    # SSRF detection (opsional): callback listener out-of-band
+    if getattr(args, "ssrf", False):
+        info("=== SSRF ===")
+        from keris.modules.ssrf import probe_ssrf
+
+        try:
+            ssrf_urls = disc.get("api_endpoints", [])[:20]
+            ssrf_findings = probe_ssrf(base, client, extra_urls=ssrf_urls)
+            findings.extend(ssrf_findings)
+            for f in ssrf_findings:
+                severity(f["severity"], f"{f['title']}: {f['endpoint']}")
+        except Exception as e:
+            warn(f"SSRF probe gagal: {e}")
+
+    # WAF detection (opsional): fingerprint WAF di awal
+    if getattr(args, "waf", False):
+        info("=== WAF ===")
+        from keris.modules.waf import detect_waf, waf_finding
+
+        try:
+            waf_res = detect_waf(base, client)
+            wf = waf_finding(waf_res)
+            if wf:
+                findings.append(wf)
+                severity(wf["severity"], f"{wf['title']}: {wf['endpoint']}")
+            elif waf_res.get("details"):
+                info("WAF tidak terdeteksi: " + "; ".join(waf_res["details"][:2]))
+        except Exception as e:
+            warn(f"WAF check gagal: {e}")
 
     # headless browser pass (opsional): render JS + DOM XSS + screenshot
     if getattr(args, "browser", False):
@@ -1280,27 +1312,33 @@ def _cmd_tls(args, cfg, overrides) -> int:
 
 
 def _cmd_waf(args, cfg, overrides) -> int:
-    from keris.modules.waf import detect_waf
+    from keris.modules.waf import detect_waf, waf_finding
 
     targets = _resolve_targets(args)
-    all_results = []
+    all_findings = []
     for target in targets:
         base = normalize_url(target)
         client = _make_client(args, cfg, overrides)
         try:
-            result = detect_waf(base, client)
+            info(f"=== WAF CHECK: {base} ===")
+            res = detect_waf(base, client)
+            wf = waf_finding(res)
+            if wf:
+                all_findings.append(wf)
+                severity(wf["severity"], f"{wf['title']}: {wf['endpoint']}")
+            else:
+                info("WAF tidak terdeteksi (tidak ada tanda tangan/blokir)")
+            for d in res.get("details", []):
+                debug(d)
         finally:
             client.close()
-        all_results.append(result)
-        if result["waf"]:
-            ok(f"WAF: {result['waf']}")
-        if result["blocked"]:
-            warn("Target tampak memblokir request scan (block page)")
     if args.json_output:
         with open(args.json_output, "w", encoding="utf-8") as f:
-            json.dump(all_results if len(all_results) > 1 else all_results[0], f, indent=2, default=str)
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "waf", "findings": all_findings}, f,
+                      indent=2, default=str)
         ok(f"JSON output: {args.json_output}")
-    return EXIT_OK
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
 
 
 def _cmd_params(args, cfg, overrides) -> int:
@@ -1824,7 +1862,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         for _flag in ("hunt", "chain", "triage", "browser", "exploit",
                       "brute_extended", "exploit_cve", "cache_poisoning",
-                      "host_header", "username_enum"):
+                      "host_header", "username_enum", "ssrf", "waf"):
             if not hasattr(args, _flag):
                 setattr(args, _flag, False)
             setattr(args, _flag, True)
@@ -1912,6 +1950,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_tui(args, cfg, overrides)
         if args.command == "hunt":
             return _cmd_hunt(args, cfg, overrides)
+        if args.command == "waf":
+            return _cmd_waf(args, cfg, overrides)
         if args.command == "credcheck":
             return _cmd_credcheck(args, cfg, overrides)
         if args.command == "init":

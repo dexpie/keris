@@ -29,7 +29,10 @@ class VulnerableHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/":
-            html = b"<html><body><h1>Demo Vuln Site</h1><script src='/app.js'></script></body></html>"
+            html = (b"<html><body><h1>Demo Vuln Site</h1>"
+                    b"<script src='/app.js'></script>"
+                    b"<a href='/api/fetch?url=http://example.com'>fetch</a>"
+                    b"</body></html>")
             self._send(200, html, "text/html")
             return
 
@@ -130,6 +133,22 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             # IDOR-like: return data user
             uid = qs.get("uid", ["1"])[0]
             self._send(200, json.dumps({"user": {"id": uid, "name": "Admin", "email": "admin@demo.local", "secret_key": "SK12345"}}).encode())
+            return
+
+        if path == "/api/fetch":
+            # SSRF: fetch URL dari parameter `url` (tanpa validasi!)
+            import urllib.request
+
+            target_url = qs.get("url", [""])[0]
+            if not target_url:
+                self._send(400, json.dumps({"error": "url required"}).encode())
+                return
+            try:
+                with urllib.request.urlopen(target_url, timeout=4) as resp:
+                    data = resp.read(1024)
+                self._send(200, json.dumps({"fetched": data.decode("utf-8", "replace")}).encode())
+            except Exception as e:
+                self._send(502, json.dumps({"error": str(e)}).encode())
             return
 
         if path == "/openapi.json":

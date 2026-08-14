@@ -291,6 +291,34 @@ fields) with a fallback to HTTP basic auth. Every confirmed credential is
 reported as HIGH so the owner can reset it immediately. Authorized use only —
 this is a live login attempt.
 
+### SSRF detection (`--ssrf`)
+
+Proves SSRF **out-of-band**: keris spins up a local callback listener, injects
+its URL into every discovered query parameter, and waits. If the server makes a
+request back, SSRF is confirmed (CRITICAL) — even when the response is
+sanitized:
+
+```bash
+keris scan https://example.com --ssrf
+```
+
+Callback host is chosen to match the target (loopback for local labs, your LAN
+IP for remote targets).
+
+### WAF detection (`waf`)
+
+Fingerprints the WAF in front of a target (Cloudflare, AWS WAF, Akamai,
+ModSecurity, F5, Imperva, and more) by matching headers/cookies/challenge pages
+and probing with common attack payloads:
+
+```bash
+keris waf https://example.com --json-output waf.json
+keris scan https://example.com --waf
+```
+
+Useful before a pentest: know what filter you're up against, and whether the
+target is already blocking payloads.
+
 ## Active attacks
 
 These modules **send payloads**. They require `--authorized` (or `--yes` for
@@ -440,6 +468,8 @@ keris/
 - [x] **Brutal multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
+- [x] **OOB SSRF detection (`--ssrf`)**
+- [x] **WAF detection & fingerprinting (`waf`)**
 
 ## Legal note
 
