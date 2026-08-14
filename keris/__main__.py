@@ -75,6 +75,19 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--webhook-type", choices=["auto", "slack", "discord", "telegram"], default="auto",
                     help="Jenis webhook (default: auto-detect dari URL)")
     ps.add_argument("--ssrf-callback", help="URL kolaborator (interactsh/Burp) untuk konfirmasi SSRF")
+    ps.add_argument("--chain", action="store_true",
+                    help="Correlation engine: gabungkan temuan rendah jadi attack chain kritis")
+    ps.add_argument("--triage", action="store_true",
+                    help="AI/rule-based triage: tandai false positive + tulis executive summary (butuh KERIS_LLM_API_KEY untuk AI)")
+    ps.add_argument("--browser", action="store_true",
+                    help="Render target dengan headless browser (Playwright): DOM XSS sink, secret di DOM, link runtime")
+    ps.add_argument("--screenshot", help="Simpan screenshot bukti halaman hasil render browser (butuh --browser)")
+    ps.add_argument("--ticket", choices=["github", "jira"],
+                    help="Auto-ticketing: buat ticket untuk temuan >= threshold (GITHUB_TOKEN/JIRA_* env)")
+    ps.add_argument("--ticket-repo", help="Repo GitHub untuk auto-ticketing, mis. owner/repo (default: KERIS_GITHUB_REPO)")
+    ps.add_argument("--ticket-project", help="Project key Jira untuk auto-ticketing")
+    ps.add_argument("--ticket-min", default="HIGH", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                    help="Severity minimum untuk auto-ticketing (default: HIGH)")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
@@ -319,6 +332,27 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     psv.add_argument("--port", type=int, default=8181, help="Port untuk UI (default: 8181)")
     psv.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     psv.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # watch (continuous monitoring)
+    pwa = sub.add_parser("watch", parents=[common],
+                         help="Continuous monitoring: scan terjadwal + diff + alert")
+    pwa.add_argument("--interval", type=int, default=3600,
+                     help="Interval antar scan (detik, default 3600)")
+    pwa.add_argument("--runs", type=int, default=None,
+                     help="Jumlah cycle (default: terus menerus sampai Ctrl+C)")
+    pwa.add_argument("--state-dir", default=".keris-watch",
+                     help="Direktori state untuk menyimpan hasil scan sebelumnya")
+    pwa.add_argument("--webhook", help="Webhook Slack/Discord/Telegram untuk alert temuan baru")
+    pwa.add_argument("--webhook-type", choices=["auto", "slack", "discord", "telegram"], default="auto")
+    pwa.add_argument("--min-severity", default="HIGH", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+                     help="Severity minimum untuk alert (default: HIGH)")
+    pwa.add_argument("--json-output", help="File output JSON hasil cycle terakhir")
+
+    # tui (terminal interactive)
+    ptu = sub.add_parser("tui", help="Terminal UI interaktif: scan + progress + hasil")
+    ptu.add_argument("target", help="URL target")
+    ptu.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    ptu.add_argument("--quiet", action="store_true", help="Minimal output")
 
     return p.parse_args(argv)
 
@@ -659,6 +693,25 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.append(f.to_dict())
             severity(f.severity, f"{f.title}: {f.endpoint}")
 
+    # headless browser pass (opsional): render JS + DOM XSS + screenshot
+    if getattr(args, "browser", False):
+        info("=== BROWSER ===")
+        from keris.modules.browser import browser_pass
+
+        try:
+            bfindings = browser_pass(
+                base,
+                screenshot=getattr(args, "screenshot", None),
+                login={"url": base, "username": getattr(args, "login_username", None),
+                       "password": getattr(args, "login_password", None)}
+                if getattr(args, "login_username", None) else None,
+            )
+            findings.extend(bfindings)
+            for f in bfindings:
+                severity(f["severity"], f"{f['title']}: {f['endpoint']}")
+        except ImportError as e:
+            warn(str(e))
+
     # plugin
     if not args.no_plugins:
         info("=== PLUGINS ===")
@@ -669,6 +722,18 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.extend(f.to_dict() for f in plugin_findings)
         else:
             debug("Tidak ada plugin ditemukan")
+
+    # correlation engine: chain temuan rendah menjadi chain kritis
+    if getattr(args, "chain", False) and findings:
+        info("=== CORRELATION ===")
+        from keris.modules.correlation import build_chains
+
+        chains = build_chains(findings)
+        for c in chains:
+            findings.append(c)
+            severity(c["severity"], f"{c['title']}: {c['endpoint']}")
+        if chains:
+            ok(f"Correlation: {len(chains)} attack chain terbentuk")
 
     # webhook notifikasi untuk temuan HIGH/CRITICAL
     webhook = getattr(args, "webhook", None)
@@ -690,6 +755,17 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
 
 def _write_outputs(base, result, args, options, cfg) -> None:
     recon, disc, findings = result["recon"], result["discovery"], result["findings"]
+
+    # AI/rule-based triage (opsional): annotate findings + executive summary
+    exec_note = None
+    if getattr(args, "triage", False):
+        from keris.modules.triage import triage_findings, executive_summary
+
+        info("=== TRIAGE ===")
+        findings, raw_ai = triage_findings(findings, cfg.to_dict() if hasattr(cfg, "to_dict") else {})
+        result["findings"] = findings
+        exec_note = executive_summary(findings, base, raw_ai)
+        ok(f"Triage selesai: {len(findings)} temuan ditinjau")
 
     if args.output:
         write_report(recon, disc, findings, args.output, base, options)
@@ -717,6 +793,8 @@ def _write_outputs(base, result, args, options, cfg) -> None:
                           "secrets": disc.get("secrets", [])},
             "findings": findings,
         }
+        if exec_note:
+            payload["executive_summary"] = exec_note
         with open(args.json_output, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, default=str)
         ok(f"JSON output: {args.json_output}")
@@ -753,6 +831,22 @@ def _cmd_scan(args, cfg, overrides) -> int:
         all_results.append(result)
         options = {"mode": "otomatis dengan Keris", "targets_file": bool(args.targets)}
         _write_outputs(base, result, args, options, cfg)
+        # auto-ticketing (opsional): temuan -> GitHub/Jira
+        if getattr(args, "ticket", None):
+            from keris.modules.ticketing import create_tickets
+
+            try:
+                created = create_tickets(
+                    result["findings"],
+                    kind=args.ticket,
+                    cfg=cfg.to_dict() if hasattr(cfg, "to_dict") else {},
+                    repo=getattr(args, "ticket_repo", None),
+                    project=getattr(args, "ticket_project", None),
+                    min_severity=getattr(args, "ticket_min", "HIGH"),
+                )
+                ok(f"Auto-ticketing: {len(created)} tiket dibuat")
+            except Exception as e:
+                error(f"Auto-ticketing gagal: {e}")
         exit_codes.append(_exit_code(result["findings"], getattr(args, "exit_on", "high")))
 
     if len(targets) > 1:
@@ -1447,6 +1541,57 @@ def _cmd_serve(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_watch(args, cfg, overrides) -> int:
+    from keris.modules.watch import watch_loop
+
+    targets = _resolve_targets(args)
+    state_dir = args.state_dir
+
+    def run_scan(target: str, out_path: str) -> str:
+        # Jalankan scan sebagai subproses dengan output JSON
+        import subprocess
+        import sys as _sys
+
+        cmd = [_sys.executable, "-m", "keris", "scan", target,
+               "--no-color", "--json-output", out_path]
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", cwd=os.getcwd())
+        if r.returncode not in (0, 1):
+            warn(f"Scan subprocess rc={r.returncode}: {r.stderr[-300:]}")
+        return out_path
+
+    alert_count = 0
+    for target in targets:
+        info(f"Watch target: {target}")
+        alert_count += watch_loop(
+            target, state_dir,
+            run_scan=run_scan,
+            interval=args.interval,
+            runs=args.runs,
+            webhook=args.webhook,
+            webhook_type=args.webhook_type,
+            min_severity=args.min_severity,
+            json_output=args.json_output,
+        )
+    if alert_count:
+        warn(f"Total cycle dengan temuan alertable: {alert_count}")
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_tui(args, cfg, overrides) -> int:
+    from keris.modules.tui import run_tui
+
+    base = normalize_url(args.target)
+    outdir = os.path.join(os.getcwd(), ".keris-tui")
+    os.makedirs(outdir, exist_ok=True)
+    # Setiap proyek TUI menjalankan scan penuh default dengan --no-color
+    cmd = [sys.executable, "-m", "keris", "scan", base, "--no-color", "-o",
+           os.path.join(outdir, "report.md")]
+    rc = run_tui(base, cmd)
+    return rc if rc in (0, 1) else EXIT_ERROR
+
+
 def _cmd_export(args, cfg, overrides) -> int:
     from keris.modules.export import export_requests
 
@@ -1572,6 +1717,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_dos(args, cfg, overrides)
         if args.command == "serve":
             return _cmd_serve(args, cfg, overrides)
+        if args.command == "watch":
+            return _cmd_watch(args, cfg, overrides)
+        if args.command == "tui":
+            return _cmd_tui(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

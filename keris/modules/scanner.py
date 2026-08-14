@@ -15,21 +15,35 @@ FINDING_LEVELS = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 
 
 class Finding:
-    def __init__(self, severity: str, title: str, endpoint: str, detail: str, evidence: str = ""):
+    def __init__(self, severity: str, title: str, endpoint: str, detail: str, evidence: str = "",
+                 cwe: str = "", references: str = "", chain: str = "", source: str = ""):
         self.severity = severity
         self.title = title
         self.endpoint = endpoint
         self.detail = detail
         self.evidence = evidence
+        self.cwe = cwe
+        self.references = references
+        self.chain = chain
+        self.source = source
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "severity": self.severity,
             "title": self.title,
             "endpoint": self.endpoint,
             "detail": self.detail,
             "evidence": self.evidence[:500],
         }
+        if self.cwe:
+            d["cwe"] = self.cwe
+        if self.references:
+            d["references"] = self.references
+        if self.chain:
+            d["chain"] = self.chain
+        if self.source:
+            d["source"] = self.source
+        return d
 
     def __repr__(self):
         return f"[{self.severity}] {self.title} @ {self.endpoint}"
