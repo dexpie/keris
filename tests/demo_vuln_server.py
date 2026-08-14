@@ -96,6 +96,14 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             self._send(401, json.dumps({"error": "invalid credentials"}).encode())
             return
 
+        if path == "/login":
+            # form login: GET menampilkan form, POST memvalidasi kredensial
+            html = ("<html><body><form action='/login' method='post'>"
+                    "<input name='username'><input name='password' type='password'>"
+                    "<button type='submit'>Login</button></form></body></html>").encode()
+            self._send(200, html, "text/html")
+            return
+
         if path == "/search":
             # SQLi error-based
             ident = qs.get("id", ["1"])[0]
@@ -222,7 +230,17 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             self._send(401, json.dumps({"error": "invalid credentials"}).encode())
             return
         if parsed.path == "/login":
-            self._send(302, b"", "text/html")
+            from urllib.parse import unquote_plus
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8", "replace")
+            vals = dict(p.split("=", 1) for p in body.split("&") if "=" in p)
+            user = unquote_plus(vals.get("username", ""))
+            pw = unquote_plus(vals.get("password", ""))
+            if user == "admin" and pw == "password123":
+                html = b"<html><body><h1>Welcome, admin</h1><a href='/logout'>logout</a></body></html>"
+                self._send(200, html, "text/html")
+            else:
+                self._send(401, json.dumps({"error": "invalid credentials"}).encode())
             return
         self._send(404, json.dumps({"error": "not found"}).encode())
 

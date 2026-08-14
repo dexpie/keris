@@ -21,6 +21,22 @@ starts rate-limiting you.
 > find out whether something can be pierced. If it can't, fine. Either way,
 > the evidence lands in the report.
 
+## ⚠️ WARNING — BRUTAL & OVERPOWERED TOOL
+
+Keris can run **active attacks**: auto-exploitation, brute-force with extended
+wordlists, credential validation against a live login, credential hunting
+(`.git` dumps, leaked keys), CVE probes, and a **multi-vector DoS hammer**
+(slowloris + slow POST + flood simultaneously).
+
+- **You are responsible for your own actions. Use with your own supervision —
+  every risk is carried by the user, not the tool.**
+- A prominent red warning banner is printed before every aggressive mode
+  (`--pwn`, `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
+  `credcheck`). It is a reminder, not a consent form.
+- **Written authorization from the target owner is mandatory.** Attacking a
+  system without permission is illegal in almost every jurisdiction.
+- Never point this at anything you don't own or aren't explicitly hired to test.
+
 [![PyPI](https://img.shields.io/pypi/v/keris-toolkit?color=d4a24e&label=keris-toolkit)](https://pypi.org/project/keris-toolkit)
 [![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)](https://github.com/dexpie/keris/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB)](https://www.python.org)
@@ -69,7 +85,7 @@ never expose it publicly.
 
 ## Commands
 
-37 subcommands. The ones you'll reach for most:
+38 subcommands. The ones you'll reach for most:
 
 | Command | What it does |
 |---|---|
@@ -90,6 +106,7 @@ never expose it publicly.
 | `watch` | Continuous monitoring: scheduled scans + diff + webhook alerts |
 | `tui` | Interactive terminal UI with a live progress dashboard |
 | `hunt` | Credential hunting: `.git` dump, `.env`/backup files, cloud secrets |
+| `credcheck` | Prove leaked credentials actually log in (authorized only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
@@ -244,6 +261,36 @@ Same safety rails as normal DoS — `--yes` is mandatory and it never runs
 against a target you don't have written permission to test. After the hammer it
 checks whether the service still answers and reports a HIGH finding if not.
 
+### One-flag everything (`--pwn`)
+
+The "overpowered" switch. Turns on **every** module in one go — recon,
+discovery, hunt, browser, correlation chains, triage, auto-exploit, brute-force
+extended, and CVE probes:
+
+```bash
+keris scan https://example.com --pwn --authorized
+```
+
+`--pwn` refuses to run without `--authorized` and prints the red warning
+banner. It is the maximum-effort pass: expect slow scans and a lot of noise —
+but also a very complete picture.
+
+### Credential validation (`credcheck`)
+
+Takes credentials (from a hunt/brute scan, a file, or the CLI) and **actually
+tries them against the target's login** to prove which ones work:
+
+```bash
+keris credcheck https://example.com --from-scan hunt.json --json-output creds.json
+keris credcheck https://example.com --creds "admin:password123,root:toor"
+keris credcheck https://example.com --creds-file creds.txt
+```
+
+Detects HTML login forms (auto-fills username/password, preserves CSRF hidden
+fields) with a fallback to HTTP basic auth. Every confirmed credential is
+reported as HIGH so the owner can reset it immediately. Authorized use only —
+this is a live login attempt.
+
 ## Active attacks
 
 These modules **send payloads**. They require `--authorized` (or `--yes` for
@@ -391,6 +438,8 @@ keris/
 - [x] **Interactive terminal UI (`tui`)**
 - [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
 - [x] **Brutal multi-vector DoS (`dos --hammer`)**
+- [x] **One-flag everything (`scan --pwn`)**
+- [x] **Live credential validation (`credcheck`)**
 
 ## Legal note
 

@@ -90,6 +90,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Severity minimum untuk auto-ticketing (default: HIGH)")
     ps.add_argument("--hunt", action="store_true",
                     help="Jalankan credential hunting (.git, .env/backup, secret cloud) dalam scan")
+    ps.add_argument("--pwn", action="store_true",
+                    help="MODE OVERPOWERED: aktifkan SEMUA modul + hunt + chain + triage + browser + exploit + brute + CVE sekaligus (wajib --authorized)")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
@@ -367,6 +369,19 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                      help="Verifikasi AWS key yang ditemukan terhadap endpoint publik AWS")
     phu.add_argument("--asset", action="append", default=[],
                      help="URL aset tambahan untuk scan secret (bisa diulang)")
+
+    # credcheck (validate leaked credentials - authorized only)
+    pcc = sub.add_parser("credcheck", parents=[common],
+                         help="Validasi kredensial: coba login sungguhan (wajib izin)")
+    pcc.add_argument("--creds", default=None,
+                     help="Pasangan user:pass, dipisah koma (user1:pass1,user2:pass2)")
+    pcc.add_argument("--creds-file", default=None,
+                     help="File teks berisi satu 'user:pass' per baris")
+    pcc.add_argument("--from-scan", default=None,
+                     help="File JSON hasil scan/hunt sebagai sumber kredensial")
+    pcc.add_argument("--auth-type", choices=["form", "basic"], default="form",
+                     help="Metode login (default: form, fallback basic)")
+    pcc.add_argument("--json-output", help="File output JSON")
 
     return p.parse_args(argv)
 
@@ -1549,7 +1564,9 @@ def _cmd_dos(args, cfg, overrides) -> int:
                 from keris.modules.dos import run_dos_test as _run
                 from keris.modules.dos import run_hammer
                 from keris.modules.scanner import Finding
+                from keris.core.logger import brutal_warning
 
+                brutal_warning("HAMMER")
                 warn("HAMMER mode: seluruh vektor serentak. Pastikan izin tertulis penuh.")
                 results = run_hammer(
                     base, client,
@@ -1649,8 +1666,82 @@ def _cmd_tui(args, cfg, overrides) -> int:
     return rc if rc in (0, 1) else EXIT_ERROR
 
 
+def _cmd_credcheck(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+    from keris.modules.credcheck import (
+        extract_creds_from_findings,
+        validate_credentials,
+    )
+
+    brutal_warning("CREDCHECK")
+
+    creds = []
+    if args.creds:
+        for part in args.creds.split(","):
+            if ":" in part:
+                user, pw = part.split(":", 1)
+                creds.append((user.strip(), pw.strip()))
+    if args.creds_file:
+        with open(args.creds_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and ":" in line:
+                    user, pw = line.split(":", 1)
+                    creds.append((user.strip(), pw.strip()))
+    if args.from_scan:
+        with open(args.from_scan, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        findings = data.get("findings", data if isinstance(data, list) else [])
+        creds.extend(extract_creds_from_findings(findings))
+
+    creds = list(dict.fromkeys(creds))
+    if not creds:
+        error("Tidak ada kredensial. Gunakan --creds, --creds-file, atau --from-scan.")
+        return EXIT_ERROR
+
+    targets = _resolve_targets(args)
+    results = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            results.extend(validate_credentials(
+                base, creds, client=client,
+                auth_type=getattr(args, "auth_type", "form")))
+        finally:
+            client.close()
+
+    confirmed = [r for r in results if r["ok"]]
+    for r in results:
+        if r["ok"]:
+            severity("HIGH", f"Kredensial VALID: {r['username']}:{r['password']} -> {r['url']}")
+        else:
+            debug(f"invalid: {r['username']}:{r['password']} ({r.get('status')})")
+
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({
+                "tool": "keris", "version": __version__,
+                "command": "credcheck",
+                "confirmed": confirmed,
+                "total_tested": len(results),
+            }, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+
+    if confirmed:
+        warn(f"{len(confirmed)} kredensial VALID. Reset segera / laporkan ke pemilik target.")
+        return EXIT_FINDINGS
+    info(f"Tidak ada kredensial valid ({len(results)} diuji)")
+    return EXIT_OK
+
+
 def _cmd_hunt(args, cfg, overrides) -> int:
     from keris.modules.hunt import run_hunt
+
+    if getattr(args, "verify", False):
+        from keris.core.logger import brutal_warning
+
+        brutal_warning("HUNT --VERIFY")
 
     targets = _resolve_targets(args)
     all_findings = []
@@ -1721,6 +1812,23 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         logger_mod.disable_color()
     set_quiet(getattr(args, "quiet", False) or overrides.get("quiet", False))
+
+    from keris.core.logger import brutal_warning
+
+    # --- MODE OVERPOWERED: --pwn mengaktifkan seluruh modul serangan ---
+    if args.command == "scan" and getattr(args, "pwn", False):
+        if not getattr(args, "authorized", False):
+            from keris.core.logger import error as _err
+
+            _err("--pwn membutuhkan --authorized (konfirmasi izin tertulis).")
+            return 2
+        for _flag in ("hunt", "chain", "triage", "browser", "exploit",
+                      "brute_extended", "exploit_cve", "cache_poisoning",
+                      "host_header", "username_enum"):
+            if not hasattr(args, _flag):
+                setattr(args, _flag, False)
+            setattr(args, _flag, True)
+        brutal_warning("PWN")
 
     # output-dir: semua laporan ditulis ke direktori tersebut
     if getattr(args, "output_dir", None):
@@ -1804,6 +1912,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_tui(args, cfg, overrides)
         if args.command == "hunt":
             return _cmd_hunt(args, cfg, overrides)
+        if args.command == "credcheck":
+            return _cmd_credcheck(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

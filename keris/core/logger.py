@@ -89,3 +89,22 @@ def severity(level: str, msg: str) -> None:
 
 def timestamp() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def brutal_warning(mode: str = "") -> None:
+    """Banner mencolok sebelum operasi agresif: tanggung jawab ada di pengguna."""
+    _write("")
+    _write(_color("  ████████████████████████████████████████████████████", RED))
+    _write(_color("  █                                              █", RED))
+    _write(_color(f"  █   KERIS {mode.upper():^36} █", RED))
+    _write(_color("  █                                              █", RED))
+    _write(_color("  █   TOOL INI BRUTAL & OVERPOWERED.             █", RED))
+    _write(_color("  █                                              █", RED))
+    _write(_color("  █   GUNAKAN DENGAN PENGAWASAN SENDIRI.         █", RED))
+    _write(_color("  █   SELURUH RISIKO DITANGGUNG PENGGUNA.        █", RED))
+    _write(_color("  █                                              █", RED))
+    _write(_color("  █   WAJIB IZIN TERTULIS DARI PEMILIK TARGET.   █", RED))
+    _write(_color("  █   MENYERANG TANPA IZIN = MELANGGAR HUKUM.    █", RED))
+    _write(_color("  █                                              █", RED))
+    _write(_color("  ████████████████████████████████████████████████████", RED))
+    _write("")
