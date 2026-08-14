@@ -28,6 +28,9 @@ jobs:
           pip install .
           pip install pytest ruff
 
+      - name: Verify wordlists packaged
+        run: python -c "import os,keris.modules.discovery as d; assert os.path.isfile(os.path.join(d.DATA_DIR,'dirs.txt')), 'dirs.txt missing'; print('wordlists OK')"
+
       - name: Lint with ruff
         run: ruff check keris tests
 

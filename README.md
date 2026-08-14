@@ -19,16 +19,21 @@ hantam target, anti kena ban.
 > "Keris" itu belati Jawa. Kecil, tajam, dan tugasnya satu: uji apakah
 > sesuatu bisa ditembus. Kalau tidak, ya tidak. Datanya tetap ada di laporan.
 
+[![PyPI](https://img.shields.io/pypi/v/keris-toolkit?color=d4a24e&label=keris-toolkit)](https://pypi.org/project/keris-toolkit)
+[![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)](https://github.com/dexpie/keris/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.9%2B-3776AB)](https://www.python.org)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 ## Isi cepat
 
 ```bash
-pip install -r requirements.txt
+pip install keris-toolkit        # atau: pip install -r requirements.txt
 
 # Scan penuh: recon + discovery + kerentanan + laporan Markdown
-python -m keris scan https://example.com -o report.md
+keris scan https://example.com -o report.md
 
 # Sekalian JSON (buat CI) dan HTML
-python -m keris scan https://example.com -o report.md \
+keris scan https://example.com -o report.md \
     --json-output report.json --html report.html
 ```
 
@@ -151,13 +156,16 @@ Lainnya:
 ## Instalasi
 
 ```bash
+pip install keris-toolkit         # cukup. semua dependensi ikut.
+keris --help
+
+# Dari source (buat development):
 git clone https://github.com/dexpie/keris.git
 cd keris
-pip install -r requirements.txt        # atau: pip install -e .
-pip install -e ".[dev]"                # + dependensi test
+pip install -e ".[dev]"           # + dependensi test
 ```
 
-Dependensi: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi, requests.
+Dependensi: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi, requests, websocket-client.
 
 Docker juga bisa:
 

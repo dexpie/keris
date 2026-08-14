@@ -3,18 +3,25 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "keris"
-version = "0.3.0"
+name = "keris-toolkit"
+version = "0.3.1"
 description = "Modular web penetration testing toolkit"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Keris Contributors" }]
-keywords = ["pentest", "security", "recon", "scanner", "web"]
+keywords = ["pentest", "security", "recon", "scanner", "web", "bugbounty", "cve"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Topic :: Security",
+    "Topic :: Internet :: WWW/HTTP",
+    "Environment :: Console",
 ]
 dependencies = [
     "requests>=2.31.0",
@@ -31,11 +38,19 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
+[project.urls]
+Homepage = "https://github.com/dexpie/keris"
+Repository = "https://github.com/dexpie/keris"
+"Bug Tracker" = "https://github.com/dexpie/keris/issues"
+
 [project.scripts]
 keris = "keris.__main__:main"
 
-[tool.setuptools.packages.find]
-include = ["keris*"]
+[tool.setuptools]
+packages = ["keris", "keris.core", "keris.modules"]
+
+[tool.setuptools.package-data]
+keris = ["data/*.txt"]
 
 [tool.ruff]
 target-version = "py39"
