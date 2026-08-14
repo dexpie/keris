@@ -67,6 +67,19 @@ def generate_report(
         lines.append(f"| {sev} | {sev_counts.get(sev, 0)} |")
     lines.append("")
 
+    # Pemetaan OWASP Top 10 & CVSS
+    from keris.cvss import classify, owasp_summary
+
+    owasp_rows = owasp_summary(findings)
+    if owasp_rows:
+        lines.append("### Klasifikasi OWASP Top 10 (2021)")
+        lines.append("")
+        lines.append("| Kategori | Jumlah Temuan |")
+        lines.append("|---|---|")
+        for row in owasp_rows:
+            lines.append(f"| {row['category']} | {row['count']} |")
+        lines.append("")
+
     # Profil target
     lines.append("## 1. Profil Target")
     lines.append("")
@@ -140,6 +153,12 @@ def generate_report(
             lines.append(f"#### {i}. [{f.get('severity', 'INFO')}] {f.get('title', '')}")
             lines.append("")
             lines.append(f"**Lokasi:** `{f.get('endpoint', '')}`")
+            lines.append("")
+            cvss = classify(f.get("title", ""), f.get("severity", ""))
+            lines.append(
+                f"**CVSS v3.1:** {cvss['score']} (`{cvss['vector']}`) · "
+                f"**OWASP:** {cvss['owasp_code']} {cvss['owasp_name']}"
+            )
             lines.append("")
             lines.append(f"**Detail:** {f.get('detail', '')}")
             lines.append("")

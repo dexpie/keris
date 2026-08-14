@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/keris-v1.0.0-3A5F8A" alt="version" />
+<img src="https://img.shields.io/badge/keris-v0.3.0-3A5F8A" alt="version" />
 
 # Keris
 
@@ -12,7 +12,7 @@ Automated black-box security testing: recon → discovery → vulnerability scan
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-54%20passed-success)
+![Tests](https://img.shields.io/badge/tests-77%20passed-success)
 
 Keris is a command-line security toolkit that turns the manual workflow of a black-box web penetration test into repeatable, scriptable commands. It grew out of real engagements against production sites (Next.js/Vercel, PHP/LiteSpeed, React SPA) and is designed for pentesters, bug bounty hunters, DevOps, and AI coding agents.
 
@@ -52,8 +52,14 @@ Keris is a command-line security toolkit that turns the manual workflow of a bla
 ## Features / Fitur
 
 - **Full pipeline**: one command runs recon → discovery → vulnerability scan → report (`scan`)
-- **27 subcommands**: recon, passive, discover, scan, fuzz, jwt, ports, openapi, bruteforce, platforms, project, wayback, dns, buckets, tls, waf, params, hidden, crawl, graphql, takeover, smuggling, export, dashboard, dos, plugins, init
+- **33 subcommands**: recon, passive, discover, scan, fuzz, jwt, ports, openapi, bruteforce, platforms, project, wayback, dns, buckets, tls, waf, params, hidden, crawl, graphql, takeover, smuggling, cachepoison, hostheader, websocket, jsanalysis, sensitive, retest, export, dashboard, dos, plugins, init
 - **Active attack modules** (authorized only): SQLi/CMDI/SSTI/XSS auto-exploit, extended credential brute-force, username enumeration, CVE/PoC probes
+- **Web cache poisoning & host header injection**: reflection of cacheable response headers / password-reset poisoning
+- **WebSocket security**: handshake auth, Origin validation, cross-origin hijacking
+- **Client-side JS analysis**: DOM XSS sinks, hidden endpoints, leaked secrets in bundles
+- **Sensitive data scan**: credentials, PII, credit cards in responses
+- **Retest & diff workflow**: compare old vs new scan to track remediation progress
+- **CVSS v3.1 & OWASP Top 10 mapping**: every finding is scored and classified in MD/HTML/PDF reports
 - **Multiple report formats**: Markdown, HTML (self-contained), PDF, JSON
 - **CI friendly**: exit codes, `--json-output`, `--exit-on` threshold
 - **Polite by default**: concurrency presets (`fast`, `stealth`, `aggressive`), delay, adaptive rate-limit backoff
@@ -140,6 +146,12 @@ Dependencies: PyYAML, PySocks, reportlab, dnspython, cryptography, certifi, requ
 | `graphql` | GraphQL testing (introspection/batching/depth) | Testing GraphQL (introspection/batching/depth) |
 | `takeover` | Subdomain takeover detection (dangling CNAME) | Deteksi subdomain takeover (CNAME menggantung) |
 | `smuggling` | HTTP request smuggling (CL.TE / TE.CL) | Deteksi HTTP request smuggling (CL.TE / TE.CL) |
+| `cachepoison` | Web cache poisoning (header reflection) | Deteksi web cache poisoning (refleksi header) |
+| `hostheader` | Host header injection / password-reset poisoning | Deteksi host header injection / password-reset poisoning |
+| `websocket` | WebSocket auth & Origin validation | Uji keamanan WebSocket (auth, Origin) |
+| `jsanalysis` | Client-side JS: DOM XSS sinks, endpoints, secrets | Analisis JS client: sink DOM XSS, endpoint, secret |
+| `sensitive` | Sensitive data exposure (creds/PII/cards) | Scan paparan data sensitif (kredensial/PII/kartu) |
+| `retest` | Compare old vs new scan (diff) | Bandingkan scan lama vs baru (retest) |
 | `export` | Findings → curl / Burp XML sessions | Temuan → sesi curl / Burp XML |
 | `dashboard` | Aggregate JSON reports into HTML dashboard | Gabungkan laporan JSON menjadi dashboard HTML |
 | `dos` | **Authorized only** app-layer resilience test | **Khusus berizin** uji ketahanan app-layer |
@@ -421,6 +433,64 @@ Detects dangling CNAMEs pointing to GitHub Pages, S3, Heroku, Azure, and more:
 python -m keris takeover example.com --json-output takeover.json
 ```
 
+### Web cache poisoning
+
+Probes cacheable endpoints with host-reflection headers (`X-Forwarded-Host`,
+`X-Host`, ...) and flags responses that reflect the injected value AND carry
+cache indicators (`Age`, `X-Cache`, CDN headers) — the recipe for stored XSS
+via cache poisoning:
+
+```bash
+python -m keris cachepoison https://example.com --json-output cache.json
+python -m keris cachepoison https://example.com --path /landing --path /home
+python -m keris scan https://example.com --cache-poisoning
+```
+
+### Host header injection
+
+Tests reflection of a spoofed `Host` header, with special attention to
+password-reset endpoints (password-reset poisoning):
+
+```bash
+python -m keris hostheader https://example.com --json-output host.json
+python -m keris hostheader https://example.com --path /reset-password
+python -m keris scan https://example.com --host-header
+```
+
+### WebSocket security
+
+Discovers WebSocket endpoints, then tests the handshake without a token and
+without an `Origin` header (cross-origin WebSocket hijacking / CSWSH):
+
+```bash
+python -m keris websocket https://example.com --json-output ws.json
+python -m keris scan https://example.com --websocket
+```
+
+Requires `websocket-client` (`pip install websocket-client` — already in
+`requirements.txt`).
+
+### Client-side JS analysis
+
+Downloads the JS bundles found during discovery and scans for DOM XSS sinks
+(`innerHTML`, `eval`, `document.write`, ...) fed by a source (`location.hash`,
+`postMessage`, ...), hidden API endpoints, and leaked secrets:
+
+```bash
+python -m keris jsanalysis https://example.com --max-assets 20 --json-output js.json
+python -m keris scan https://example.com --js-analysis
+```
+
+### Sensitive data exposure
+
+Scans responses for leaked credentials, API keys, JWTs, emails, phone numbers
+and credit cards, using context keywords to keep false positives low:
+
+```bash
+python -m keris sensitive https://example.com --endpoint /api/users
+python -m keris scan https://example.com --sensitive-data
+```
+
 ### Weak login credentials
 
 ```bash
@@ -501,6 +571,26 @@ python -m keris scan https://example.com --waf
 python -m keris scan https://example.com -o report.md --html report.html --pdf report.pdf --json-output out.json
 python -m keris scan https://example.com --no-color --output-dir ./reports
 ```
+
+Every finding in the Markdown/HTML/PDF reports is annotated with a **CVSS v3.1
+vector + base score** and its **OWASP Top 10 (2021)** category, and the report
+includes an OWASP classification summary table.
+
+### Retest & diff workflow
+
+Compare an old scan with a new one to track remediation progress:
+
+```bash
+python -m keris scan https://example.com --json-output jan.json
+# ... team fixes findings ...
+python -m keris scan https://example.com --json-output feb.json
+python -m keris retest jan.json feb.json -o retest.md --json-output retest.json
+```
+
+The retest report groups findings into **fixed**, **new**, **persisting** and
+**severity changed**, and prints a remediation progress percentage. Exit code
+is non-zero when there are new or persisting findings — usable as a CI gate
+for "has the fix landed?".
 
 ### Export sessions (curl / Burp)
 
@@ -630,8 +720,9 @@ python -m keris scan http://127.0.0.1:8099 -o demo.md
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / hidden / crawl / graphql / takeover / smuggling / export / dashboard / dos)
+│   ├── __main__.py        # CLI (scan / recon / passive / discover / plugins / fuzz / init / jwt / ports / openapi / bruteforce / platforms / project / wayback / dns / buckets / tls / waf / params / hidden / crawl / graphql / takeover / smuggling / cachepoison / hostheader / websocket / jsanalysis / sensitive / retest / export / dashboard / dos)
 │   ├── payloads.py        # SQLi, XSS, SSRF, CMDI, SSTI payloads + secret/redirect/url/hidden params
+│   ├── cvss.py            # CVSS v3.1 scoring + OWASP Top 10 mapping
 │   ├── report.py          # Markdown report generator
 │   ├── report_html.py     # Self-contained HTML report generator
 │   ├── report_pdf.py      # PDF report generator (reportlab)
@@ -653,6 +744,12 @@ keris/
 │   │   ├── graphql.py     # GraphQL testing
 │   │   ├── takeover.py    # subdomain takeover detection
 │   │   ├── smuggling.py   # request smuggling (CL.TE / TE.CL)
+│   │   ├── cachepoison.py # web cache poisoning (header reflection)
+│   │   ├── hostheader.py  # host header injection / password-reset poisoning
+│   │   ├── websocket.py   # WebSocket security (auth, Origin, CSWSH)
+│   │   ├── jsanalysis.py  # client-side JS: DOM XSS sinks, endpoints, secrets
+│   │   ├── sensitive.py   # sensitive data exposure scan (creds/PII/cards)
+│   │   ├── retest.py      # old-vs-new scan diff & remediation tracking
 │   │   ├── exploit.py     # auto-exploit: SQLi/CMDI/SSTI/XSS (authorized only)
 │   │   ├── cve.py         # CVE/PoC probes for detected platforms (authorized only)
 │   │   ├── jwt.py         # JWT decode + weak signature / alg:none / confusion checks
@@ -697,16 +794,10 @@ keris/
 - [x] Hidden endpoint discovery, web crawler, GraphQL testing
 - [x] Subdomain takeover & HTTP request smuggling detection
 - [x] Active attacks: auto-exploit injection, extended brute-force, username enumeration, CVE/PoC probes (authorized only)
-
-Planned / Rencana:
-
-- [ ] Web cache poisoning check
-- [ ] Host header injection test
-- [ ] WebSocket security test
-- [ ] Client-side JS analysis (DOM XSS sinks)
-- [ ] Sensitive data exposure scan
-- [ ] Retest & diff workflow
-- [ ] CVSS & OWASP Top 10 mapping
+- [x] Web cache poisoning & host header injection (password-reset poisoning)
+- [x] WebSocket security test, client-side JS analysis (DOM XSS sinks)
+- [x] Sensitive data exposure scan, retest & diff workflow
+- [x] CVSS v3.1 scoring & OWASP Top 10 mapping in all report formats
 
 ---
 

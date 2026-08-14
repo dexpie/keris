@@ -29,8 +29,25 @@ class VulnerableHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path == "/":
-            html = b"<html><body><h1>Demo Vuln Site</h1></body></html>"
+            html = b"<html><body><h1>Demo Vuln Site</h1><script src='/app.js'></script></body></html>"
             self._send(200, html, "text/html")
+            return
+
+        if path == "/refl":
+            # cache poisoning + host header: refleksikan X-Forwarded-Host & Host
+            xfh = self.headers.get("X-Forwarded-Host", "")
+            host = self.headers.get("Host", "")
+            html = (
+                f"<html><meta content='https://{xfh}/'><a href='//{host}/reset'>"
+                f"<script src='//{xfh}/x.js'></script></body></html>"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("X-Cache", "HIT")
+            self.send_header("Cache-Control", "public, max-age=60")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
             return
 
         if path == "/uploads/":
@@ -136,6 +153,36 @@ class VulnerableHandler(BaseHTTPRequestHandler):
 
         if path == "/dashboard":
             self._send(200, json.dumps({"protected": True, "user": "demo"}).encode())
+            return
+
+        if path == "/poison":
+            # web cache poisoning: refleksikan X-Forwarded-Host + penanda cache
+            host = self.headers.get("X-Forwarded-Host", "")
+            html = f"<html><meta content='https://{host}/'><script src='//{host}/x.js'></script></html>".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("X-Cache", "HIT")
+            self.send_header("Cache-Control", "public, max-age=60")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
+
+        if path == "/reset":
+            # host header injection: endpoint reset yang merefleksikan Host
+            h = self.headers.get("Host", "")
+            body = f"<html><p>Link reset: https://{h}/reset-password?token=SECRET123</p></html>".encode()
+            self._send(200, body, "text/html")
+            return
+
+        if path == "/app.js":
+            body = (
+                "var a = document.getElementById('x').innerHTML = location.hash;\n"
+                "eval(location.search.slice(1));\n"
+                "fetch('/api/internal/users');\n"
+                "var k = 'AKIAIOSFODNN7EXAMPLE';\n"
+            ).encode()
+            self._send(200, body, "text/javascript")
             return
 
         self._send(404, json.dumps({"error": "not found"}).encode())

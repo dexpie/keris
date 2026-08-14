@@ -92,6 +92,16 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--exploit-cve", action="store_true",
                     help="CVE/PoC probe untuk platform terdeteksi (butuh --authorized)")
     ps.add_argument("--cve-platform", help="Batasi CVE check ke platform tertentu (opsional)")
+    ps.add_argument("--cache-poisoning", action="store_true",
+                    help="Cek web cache poisoning (refleksi header)")
+    ps.add_argument("--host-header", action="store_true",
+                    help="Cek host header injection / password-reset poisoning")
+    ps.add_argument("--websocket", action="store_true",
+                    help="Cek keamanan endpoint WebSocket (butuh websocket-client)")
+    ps.add_argument("--js-analysis", action="store_true",
+                    help="Analisis bundle JS untuk DOM XSS sinks & secret")
+    ps.add_argument("--sensitive-data", action="store_true",
+                    help="Scan paparan data sensitif (kredensial/PII/kartu)")
 
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
@@ -231,6 +241,47 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # smuggling (request smuggling)
     psm = sub.add_parser("smuggling", parents=[common], help="Deteksi HTTP request smuggling (CL.TE/TE.CL)")
     psm.add_argument("--json-output", help="File output JSON")
+
+    # cachepoison (web cache poisoning)
+    pcache = sub.add_parser("cachepoison", parents=[common],
+                            help="Deteksi web cache poisoning (refleksi header yang bisa di-cache)")
+    pcache.add_argument("--path", action="append", default=[],
+                        help="Path yang diuji (dapat diulang). Default: path umum cacheable")
+    pcache.add_argument("--json-output", help="File output JSON")
+
+    # hostheader (host header injection)
+    phost = sub.add_parser("hostheader", parents=[common],
+                           help="Deteksi host header injection / password-reset poisoning")
+    phost.add_argument("--path", action="append", default=[],
+                       help="Path yang diuji (dapat diulang). Default: path umum sensitif")
+    phost.add_argument("--json-output", help="File output JSON")
+
+    # websocket (keamanan WebSocket)
+    pws = sub.add_parser("websocket", parents=[common],
+                         help="Uji keamanan endpoint WebSocket (auth, origin, message)")
+    pws.add_argument("--json-output", help="File output JSON")
+
+    # jsanalysis (analisis bundle JS)
+    pjs = sub.add_parser("jsanalysis", parents=[common],
+                         help="Analisis bundle JS: DOM XSS sinks, endpoint tersembunyi, secret")
+    pjs.add_argument("--max-assets", type=int, default=15, help="Maksimum asset JS dianalisis")
+    pjs.add_argument("--json-output", help="File output JSON")
+
+    # sensitive (paparan data sensitif)
+    psen = sub.add_parser("sensitive", parents=[common],
+                          help="Scan paparan data sensitif (kredensial/PII/kartu kredit)")
+    psen.add_argument("--endpoint", action="append", default=[],
+                      help="Endpoint yang diuji (dapat diulang). Default: '/' saja")
+    psen.add_argument("--json-output", help="File output JSON")
+
+    # retest (perbandingan scan lama vs baru)
+    pretest = sub.add_parser("retest", help="Bandingkan scan lama & scan baru (retest workflow)")
+    pretest.add_argument("old_json", help="File hasil scan lama (JSON output Keris)")
+    pretest.add_argument("new_json", help="File hasil scan baru (JSON output Keris)")
+    pretest.add_argument("-o", "--output", help="File laporan markdown retest")
+    pretest.add_argument("--json-output", help="File output JSON diff")
+    pretest.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pretest.add_argument("--quiet", action="store_true", help="Minimal output")
 
     # export (curl/burp session dari temuan JSON)
     pex = sub.add_parser("export", help="Export temuan JSON menjadi curl / Burp XML")
@@ -511,6 +562,44 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
 
         he = find_hidden_endpoints(base, client)
         findings.extend(x.to_dict() for x in he)
+
+    # web cache poisoning (opsional)
+    if getattr(args, "cache_poisoning", False):
+        from keris.modules.cachepoison import check_cache_poisoning
+
+        cpf = check_cache_poisoning(base, client)
+        findings.extend(x.to_dict() for x in cpf)
+
+    # host header injection (opsional)
+    if getattr(args, "host_header", False):
+        from keris.modules.hostheader import check_host_header
+
+        hhf = check_host_header(base, client)
+        findings.extend(x.to_dict() for x in hhf)
+
+    # websocket security (opsional)
+    if getattr(args, "websocket", False):
+        from keris.modules.websocket import check_websocket
+
+        wsf = check_websocket(base, client, disc.get("js_assets", []))
+        findings.extend(x.to_dict() for x in wsf)
+
+    # client-side JS analysis (opsional)
+    if getattr(args, "js_analysis", False):
+        from keris.modules.jsanalysis import analyze_js
+
+        jsa = analyze_js(base, client, disc.get("js_assets", []),
+                         max_assets=overrides.get("max_assets", cfg.max_assets))
+        findings.extend(x.to_dict() for x in jsa["findings"])
+        disc.setdefault("js_endpoints", []).extend(jsa["endpoints"])
+        disc["secret_count"] = disc.get("secret_count", 0) + jsa["secret_count"]
+
+    # sensitive data exposure (opsional)
+    if getattr(args, "sensitive_data", False):
+        from keris.modules.sensitive import check_sensitive
+
+        senf = check_sensitive(base, client, endpoints[:30])
+        findings.extend(x.to_dict() for x in senf)
 
     # cloud bucket check (opsional)
     if getattr(args, "buckets", False):
@@ -1195,6 +1284,120 @@ def _cmd_smuggling(args, cfg, overrides) -> int:
     return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
 
 
+def _cmd_cachepoison(args, cfg, overrides) -> int:
+    from keris.modules.cachepoison import check_cache_poisoning
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_cache_poisoning(base, client,
+                                                      paths=args.path or None))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_hostheader(args, cfg, overrides) -> int:
+    from keris.modules.hostheader import check_host_header
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_host_header(base, client,
+                                                  paths=args.path or None))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_websocket(args, cfg, overrides) -> int:
+    from keris.modules.websocket import check_websocket
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_websocket(base, client))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_jsanalysis(args, cfg, overrides) -> int:
+    from keris.modules.jsanalysis import analyze_js
+
+    targets = _resolve_targets(args)
+    all_results = []
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            res = analyze_js(base, client, max_assets=args.max_assets)
+            all_results.append({"target": base, "js_scanned": res["js_scanned"],
+                                "endpoints": res["endpoints"],
+                                "secret_count": res["secret_count"]})
+            all_findings.extend(res["findings"])
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"results": all_results,
+                       "findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_sensitive(args, cfg, overrides) -> int:
+    from keris.modules.sensitive import check_sensitive
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides)
+        try:
+            all_findings.extend(check_sensitive(base, client,
+                                                endpoints=args.endpoint or None))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_retest(args, cfg, overrides) -> int:
+    from keris.modules.retest import retest
+
+    diff = retest(args.old_json, args.new_json, args.output, args.json_output)
+    # exit 1 bila ada temuan baru / belum diperbaiki
+    if diff["summary"]["new"] or diff["summary"]["persisting"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
 def _cmd_dos(args, cfg, overrides) -> int:
     from keris.modules.dos import run_dos_test
 
@@ -1335,6 +1538,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_takeover(args, cfg, overrides)
         if args.command == "smuggling":
             return _cmd_smuggling(args, cfg, overrides)
+        if args.command == "cachepoison":
+            return _cmd_cachepoison(args, cfg, overrides)
+        if args.command == "hostheader":
+            return _cmd_hostheader(args, cfg, overrides)
+        if args.command == "websocket":
+            return _cmd_websocket(args, cfg, overrides)
+        if args.command == "jsanalysis":
+            return _cmd_jsanalysis(args, cfg, overrides)
+        if args.command == "sensitive":
+            return _cmd_sensitive(args, cfg, overrides)
+        if args.command == "retest":
+            return _cmd_retest(args, cfg, overrides)
         if args.command == "export":
             return _cmd_export(args, cfg, overrides)
         if args.command == "dashboard":

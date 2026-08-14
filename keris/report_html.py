@@ -49,6 +49,9 @@ def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: Li
     finding_cards = ""
     for i, f in enumerate(sorted(findings, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "INFO").upper(), 9)), 1):
         sev = f.get("severity", "INFO").upper()
+        from keris.cvss import classify
+
+        cvss = classify(f.get("title", ""), sev)
         finding_cards += f"""
         <div class="card">
           <div class="card-head">
@@ -56,12 +59,21 @@ def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: Li
             <span class="card-title">{_e(f.get('title', ''))}</span>
           </div>
           <p class="endpoint">{_e(f.get('endpoint', ''))}</p>
+          <p><span class="cvss">CVSS {cvss['score']} &middot; {_e(cvss['vector'])}</span>
+             <span class="owasp">{_e(cvss['owasp_code'])} {_e(cvss['owasp_name'])}</span></p>
           <p>{_e(f.get('detail', ''))}</p>
           <pre>{_e(f.get('evidence', ''))[:1000]}</pre>
         </div>"""
 
     if not findings:
         finding_cards = '<div class="card"><p>No vulnerabilities detected during this scan.</p></div>'
+
+    from keris.cvss import owasp_summary
+
+    _owasp = owasp_summary(findings)
+    owasp_rows = "".join(
+        f"<tr><td>{_e(r['category'])}</td><td>{r['count']}</td></tr>" for r in _owasp
+    ) or "<tr><td colspan=2>Tidak ada temuan</td></tr>"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -94,6 +106,8 @@ code {{ background: #1e293b; padding: 2px 5px; border-radius: 4px; font-size: 12
 .badge {{ color: #fff; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }}
 .card-title {{ font-weight: 600; }}
 .endpoint {{ font-family: monospace; font-size: 12px; color: #93c5fd; margin: 4px 0; }}
+.cvss {{ font-size: 12px; color: #fbbf24; }}
+.owasp {{ font-size: 12px; color: #a78bfa; margin-left: 12px; }}
 pre {{ background: #0f172a; padding: 10px; border-radius: 6px; font-size: 11px; overflow-x: auto; margin-top: 8px; }}
 ul {{ padding-left: 20px; font-size: 13px; }}
 li {{ margin: 3px 0; }}
@@ -114,6 +128,12 @@ li {{ margin: 3px 0; }}
 
   <h2>Severity</h2>
   {sev_bars}
+
+  <h2>OWASP Top 10 (2021)</h2>
+  <table>
+    <tr><th>Kategori</th><th>Jumlah Temuan</th></tr>
+    {owasp_rows}
+  </table>
 
   <h2>Target Profile</h2>
   <table>

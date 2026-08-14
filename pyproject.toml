@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "keris"
-version = "0.2.0"
+version = "0.3.0"
 description = "Modular web penetration testing toolkit"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,6 +25,7 @@ dependencies = [
     "dnspython>=2.0.0",
     "cryptography>=41.0.0",
     "certifi>=2023.7.22",
+    "websocket-client>=1.7.0",
 ]
 
 [project.optional-dependencies]

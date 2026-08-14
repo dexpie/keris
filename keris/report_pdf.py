@@ -82,6 +82,23 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
     ))
     story.append(Spacer(1, 4 * mm))
 
+    # Ringkasan OWASP Top 10
+    from keris.cvss import owasp_summary
+
+    owasp_rows = owasp_summary(findings)
+    if owasp_rows:
+        story.append(Paragraph("Klasifikasi OWASP Top 10 (2021)", h2))
+        ow_data = [["Kategori", "Jumlah"]] + [[r["category"], r["count"]] for r in owasp_rows]
+        ot = Table(ow_data, colWidths=[70 * mm, 30 * mm])
+        ot.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#263238")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cfd8dc")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ]))
+        story.append(ot)
+        story.append(Spacer(1, 5 * mm))
+
     # Temuan
     story.append(Paragraph("Temuan", h2))
     if not findings:
@@ -89,6 +106,9 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
     for i, f in enumerate(findings, 1):
         sev = f.get("severity", "INFO").upper()
         color = _SEV_COLORS.get(sev, colors.black)
+        from keris.cvss import classify
+
+        cvss = classify(f.get("title", ""), sev)
         story.append(Paragraph(
             f"{i}. [{sev}] {f.get('title', '')}",
             ParagraphStyle(f"f{i}", parent=normal, textColor=color,
@@ -96,6 +116,11 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
         ))
         story.append(Paragraph(
             f"<b>Endpoint:</b> {f.get('endpoint', '')}",
+            small,
+        ))
+        story.append(Paragraph(
+            f"<b>CVSS v3.1:</b> {cvss['score']} ({cvss['vector']}) &nbsp; "
+            f"<b>OWASP:</b> {cvss['owasp_code']} {cvss['owasp_name']}",
             small,
         ))
         story.append(Paragraph(f"<b>Detail:</b> {f.get('detail', '')}", normal))
