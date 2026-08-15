@@ -36,7 +36,7 @@ class TestCliPackage:
                     "dashboard", "dos", "serve", "watch", "tui", "hunt",
                     "credcheck", "exploit", "shell", "pivot", "rebind",
                     "gitdump", "authbypass", "spray", "dbdump", "cloud",
-                    "xsshook", "k8s", "crack", "init"):
+                    "xsshook", "k8s", "crack", "har", "re", "backdoor", "init"):
             assert hasattr(main, "__call__"), cmd
 
 

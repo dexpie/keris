@@ -143,6 +143,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Cek keamanan endpoint WebSocket (butuh websocket-client)")
     ps.add_argument("--js-analysis", action="store_true",
                     help="Analisis bundle JS untuk DOM XSS sinks & secret")
+    ps.add_argument("--re", action="store_true",
+                    help="Reverse engineering asset JS: deobfuscation + source map + endpoint/secret")
+    ps.add_argument("--backdoor", action="store_true",
+                    help="Deteksi link backdoor: script/iframe mencurigakan, webshell, URL ter-encode")
     ps.add_argument("--ssrf", action="store_true",
                     help="Deteksi SSRF via callback listener (out-of-band) pada tiap parameter")
     ps.add_argument("--ssrf-exploit", action="store_true",
@@ -165,6 +169,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Mining URL historis dari Wayback Machine (pasif) untuk discovery aset tersembunyi")
     ps.add_argument("--race-endpoints", default=None,
                     help="Endpoint tambahan untuk uji race (koma, mis. /api/coupon,/api/topup)")
+    ps.add_argument("--har", default="",
+                    help="Impor sesi dari file HAR/Postman: tambahkan endpoint+cookie ke scan")
+    ps.add_argument("--session-cookie", default="",
+                    help="Cookie sesi untuk request terautentikasi (format k=v; k2=v2)")
 
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
@@ -612,6 +620,43 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                      help="KONFIRMASI izin tertulis untuk cracking hash target")
     pcr.add_argument("--json-output", help="File output JSON")
 
+    # har (import sesi HAR/Postman & replay)
+    ph = sub.add_parser("har", parents=[common],
+                        help="Import sesi HAR/Postman Collection & replay ke target")
+    ph.add_argument("session", help="File HAR (.har) atau Postman Collection (.json)")
+    ph.add_argument("--method", default="", help="Filter method (mis. GET/POST)")
+    ph.add_argument("--replay", action="store_true",
+                    help="Replay request ke target (hanya yang berasal dari target yang sama)")
+    ph.add_argument("--replay-target", default="",
+                    help="URL target untuk replay (default: host dari sesi)")
+    ph.add_argument("--json-output", help="File output JSON")
+    ph.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
+    # re (reverse engineering JS)
+    pre = sub.add_parser("re", parents=[common],
+                         help="Reverse engineering asset JS: deobfuscation, source map, endpoint/secret")
+    pre.add_argument("--asset", action="append", default=[],
+                     help="URL asset JS spesifik (dapat diulang; default: cari dari halaman)")
+    pre.add_argument("--save-deobfuscated", default="",
+                     help="Simpan hasil deobfuscation ke file (per asset)")
+    pre.add_argument("--max-assets", type=int, default=20,
+                     help="Maksimum asset JS dianalisis (default: 20)")
+    pre.add_argument("--json-output", help="File output JSON")
+    pre.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
+    # backdoor (deteksi link/script mencurigakan)
+    pbd = sub.add_parser("backdoor", parents=[common],
+                         help="Deteksi link backdoor: script/iframe mencurigakan, webshell, URL ter-encode")
+    pbd.add_argument("--url", action="append", default=[],
+                     help="URL tambahan untuk disk (dapat diulang)")
+    pbd.add_argument("--max-pages", type=int, default=5,
+                     help="Maksimum halaman yang di-crawl untuk disk (default: 5)")
+    pbd.add_argument("--json-output", help="File output JSON")
+    pbd.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
+
     return p.parse_args(argv)
 
 
@@ -728,6 +773,34 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     info("=== SCANNER ===")
     endpoints = disc.get("api_endpoints", [])[:50]
     base_clean = base.rstrip("/")
+
+    # impor sesi HAR/Postman: tambahkan endpoint & cookie ke scan (opsional)
+    if getattr(args, "har", None):
+        from keris.har import requests_from_file
+        from urllib.parse import urlparse as _uparse
+
+        try:
+            sesi = requests_from_file(args.har)
+            host = _uparse(base).netloc
+            sesi_f = [r for r in sesi if host in _uparse(r.url).netloc or not _uparse(r.url).netloc]
+            for r in sesi_f[:60]:
+                path = _uparse(r.url).path
+                if r.url.startswith(("http://", "https://")) and path:
+                    eps = path + (("?" + _uparse(r.url).query) if _uparse(r.url).query else "")
+                    if eps not in endpoints:
+                        endpoints.append(eps)
+                if r.cookies and not getattr(args, "session_cookie", ""):
+                    setattr(args, "session_cookie",
+                            "; ".join(f"{k}={v}" for k, v in r.cookies.items()))
+            if sesi_f:
+                info(f"Sesi diimpor: {len(sesi_f)} request dari {args.har}")
+        except Exception as e:
+            warn(f"Impor sesi gagal: {e}")
+
+    # cookie sesi terautentikasi (jika diberikan via --session-cookie / --har)
+    if getattr(args, "session_cookie", ""):
+        client.session.headers["Cookie"] = args.session_cookie
+        info("Cookie sesi disuntikkan ke semua request")
 
     # analisis JWT yang ditemukan di bundle JS / halaman
     from keris.modules.jwt import analyze_jwt, extract_jwts
@@ -901,6 +974,42 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         findings.extend(x.to_dict() for x in jsa["findings"])
         disc.setdefault("js_endpoints", []).extend(jsa["endpoints"])
         disc["secret_count"] = disc.get("secret_count", 0) + jsa["secret_count"]
+
+    # reverse engineering asset JS (opsional)
+    if getattr(args, "re", False):
+        from keris.modules.reverse import analyze_assets
+
+        re_assets = disc.get("js_assets", [])[:10]
+        if not re_assets:
+            re_assets = [base]
+        re_res = analyze_assets(base, client, re_assets,
+                                max_assets=overrides.get("max_assets", cfg.max_assets))
+        disc.setdefault("js_endpoints", []).extend(re_res.get("endpoints", []))
+        for sec in re_res.get("secrets", []):
+            from keris.modules.scanner import Finding as _F
+
+            findings.append(_F(
+                "HIGH", f"Secret ditemukan via reverse engineering: {sec['type']}",
+                base, "Secret tersembunyi di bundle JS ter-obfuscate.",
+                sec["match"][:300],
+            ).to_dict())
+        if re_res.get("sources"):
+            disc["js_sources"] = re_res["sources"]
+        info(f"RE: {len(re_res.get('assets', []))} asset, "
+             f"{len(re_res.get('endpoints', []))} endpoint, "
+             f"{len(re_res.get('secrets', []))} secret")
+
+    # backdoor link detection (opsional)
+    if getattr(args, "backdoor", False):
+        from keris.modules.backdoor import scan_assets as scan_bd
+
+        try:
+            html_src = client.get(base, timeout=15).text
+        except requests.RequestException:
+            html_src = ""
+        bd_f = scan_bd(base, client, disc.get("js_assets", []), html=html_src)
+        findings.extend(x.to_dict() for x in bd_f)
+        info(f"Backdoor check: {len(bd_f)} sinyal")
 
     # sensitive data exposure (opsional)
     if getattr(args, "sensitive_data", False):

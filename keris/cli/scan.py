@@ -617,3 +617,149 @@ def _cmd_bruteforce(args, cfg, overrides) -> int:
     return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
 
 
+def _cmd_har(args, cfg, overrides) -> int:
+    from keris.har import requests_from_file
+    from urllib.parse import urlparse
+
+    try:
+        reqs = requests_from_file(args.session)
+    except Exception as e:
+        error(f"Gagal membaca sesi: {e}")
+        return EXIT_ERROR
+    if args.method:
+        reqs = [r for r in reqs if r.method.lower() == args.method.lower()]
+    if args.replay:
+        targets = []
+        if args.replay_target:
+            targets = [normalize_url(args.replay_target)]
+        else:
+            hosts = sorted({urlparse(r.url).netloc for r in reqs if urlparse(r.url).netloc})
+            targets = [normalize_url("https://" + h) for h in hosts[:1]]
+        if not targets:
+            error("Tidak ada host untuk replay. Berikan --replay-target.")
+            return EXIT_ERROR
+        from keris.modules.scanner import Finding
+
+        findings = []
+        for t in targets:
+            client = _make_client(args, cfg, overrides, t)
+            try:
+                for r in reqs[:100]:
+                    url = r.url
+                    if urlparse(url).netloc and urlparse(url).netloc not in urlparse(t).netloc:
+                        continue
+                    resp = client.request(r.method, url, headers=r.headers or None,
+                                          data=r.data or None, allow_redirects=False)
+                    if resp.status_code >= 400:
+                        findings.append(Finding(
+                            "MEDIUM", f"Replay gagal {r.method} {urlparse(url).path}",
+                            t, f"HTTP {resp.status_code} saat replay sesi terimpor.",
+                            r.data or "",
+                        ))
+            finally:
+                client.close()
+        if args.json_output:
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"replayed": len(reqs),
+                           "findings": [x.to_dict() for x in findings]}, f, indent=2)
+            ok(f"JSON output: {args.json_output}")
+        return _exit_code([x.to_dict() for x in findings], getattr(args, "exit_on", "high"))
+    # tanpa --replay: tampilkan ringkasan request terimpor
+    summary = []
+    for r in reqs[:200]:
+        from urllib.parse import urlparse as _up
+
+        p = _up(r.url)
+        summary.append({"method": r.method, "host": p.netloc,
+                        "path": p.path + (("?" + p.query) if p.query else ""),
+                        "has_cookies": bool(r.cookies), "has_body": bool(r.data)})
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"session": args.session, "total": len(reqs), "requests": summary},
+                      f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    else:
+        for s in summary:
+            ok(f"{s['method']:7} {s['host']}{s['path']}"
+               f"{'  [cookie]' if s['has_cookies'] else ''}"
+               f"{'  [body]' if s['has_body'] else ''}")
+        ok(f"Total: {len(reqs)} request")
+    return EXIT_OK
+
+
+def _cmd_re(args, cfg, overrides) -> int:
+    from keris.modules.reverse import analyze_assets
+    from keris.modules.scanner import Finding
+
+    targets = _resolve_targets(args)
+    all_results = []
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            assets = args.asset or [base]
+            res = analyze_assets(base, client, assets, max_assets=args.max_assets)
+            for sec in res.get("secrets", []):
+                all_findings.append(Finding(
+                    "HIGH", f"Secret di bundle JS: {sec['type']}",
+                    base, "Secret ditemukan setelah deobfuscation.",
+                    sec["match"][:300],
+                ))
+            all_results.append({
+                "target": base,
+                "assets": [{"url": a.get("url"), "obfuscated": a.get("obfuscated"),
+                            "endpoints": a.get("endpoints"),
+                            "secrets": a.get("secrets"),
+                            "sources": a.get("sources"),
+                            "stats_before": a.get("stats_before"),
+                            "stats_after": a.get("stats_after")}
+                           for a in res.get("assets", [])],
+                "endpoints": res.get("endpoints", []),
+                "secrets": res.get("secrets", []),
+            })
+            if args.save_deobfuscated and res.get("assets"):
+                for a in res["assets"]:
+                    if not a.get("deobfuscated_len"):
+                        continue
+                    ok(f"Deobfuscated asset: {a['url']} "
+                       f"({a.get('stats_before', {}).get('chars', 0)} -> "
+                       f"{a.get('deobfuscated_len', 0)} char)")
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"results": all_results,
+                       "findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
+def _cmd_backdoor(args, cfg, overrides) -> int:
+    from keris.modules.backdoor import scan_assets as scan_bd
+
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            extra = []
+            if getattr(args, "url", None):
+                extra = [normalize_url(u) for u in args.url]
+            html = ""
+            for u in [base] + extra:
+                try:
+                    html += client.get(u, timeout=15).text or ""
+                except requests.RequestException:
+                    continue
+            all_findings.extend(scan_bd(base, client, [], html=html))
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"findings": [x.to_dict() for x in all_findings]}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
+
+
