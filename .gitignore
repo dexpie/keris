@@ -68,3 +68,4 @@ Thumbs.db
 # Catatan pribadi (bukan untuk repo publik)
 PROMO.md
 promo/
+.coverage

@@ -47,7 +47,7 @@ Repository = "https://github.com/dexpie/keris"
 keris = "keris.__main__:main"
 
 [tool.setuptools]
-packages = ["keris", "keris.core", "keris.modules"]
+packages = ["keris", "keris.core", "keris.modules", "keris.cli"]
 
 [tool.setuptools.package-data]
 keris = ["data/*.txt"]
@@ -58,4 +58,10 @@ target-version = "py39"
 [tool.ruff.lint]
 # Fokus pada bug nyata (pyflakes) dan error syntax; biarkan style lain longgar.
 select = ["F", "E9"]
-ignore = ["F401"]
+ignore = ["F401", "F405"]
+
+[tool.pyright]
+# Type checking dasar; nonaktifkan laporan usage agar fokus pada error nyata.
+typeCheckingMode = "basic"
+reportOptionalMemberAccess = "none"
+reportPrivateUsage = "none"

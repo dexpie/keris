@@ -73,7 +73,7 @@ def check_dns(domain: str) -> Dict:
     return result
 
 
-def resolve_subdomains(domain: str, subdomains: List[str]) -> List[str]:
+def resolve_subdomains(domain: str, subdomains: List[str]) -> List[dict]:
     """Resolve daftar subdomain -> host yang aktif (A/AAAA/CNAME)."""
     active = []
     for sub in subdomains:

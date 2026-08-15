@@ -19,15 +19,24 @@ jobs:
 
       - name: Extract target URL
         id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
         run: |
           # Ambil URL pertama yang mirip https://... dari body PR atau komentar.
-          # Contoh trigger: "/scan https://staging.example.com"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            body="${{ github.event.pull_request.body }}"
+          # Input user TIDAK pernah di-interpolasi ke shell; dikirim via env.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            body="$PR_BODY"
           else
-            body="${{ github.event.comment.body }}"
+            body="$COMMENT_BODY"
           fi
-          url=$(echo "$body" | grep -oE 'https?://[^ )]+' | head -n1 || true)
+          url=$(printf '%s' "$body" | grep -oE 'https?://[^ )]+' | head -n1 || true)
+          # batasi ke protokol http(s) saja, cegah injeksi karakter shell
+          case "$url" in
+            http://*|https://*) : ;;
+            *) url="" ;;
+          esac
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Install keris-toolkit
@@ -35,19 +44,22 @@ jobs:
 
       - name: Run scan
         id: scan
+        env:
+          SCAN_URL: ${{ steps.target.outputs.url }}
         run: |
-          url="${{ steps.target.outputs.url }}"
-          if [ -z "$url" ]; then
+          if [ -z "$SCAN_URL" ]; then
             echo "no_target=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          keris scan "$url" -o scan-report.md \
+          keris scan "$SCAN_URL" -o scan-report.md \
             --json-output scan.json \
             --exit-on high \
             || true
 
       - name: Post result comment
         if: always()
+        env:
+          TARGET_URL: ${{ steps.target.outputs.url }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -69,21 +81,16 @@ jobs:
             }
             const report = `<details><summary>Keris scan: ${target}</summary>\n\n\`\`\`\n${summary}\n\`\`\`\n\nLaporan lengkap ada di artifact \`scan-report\`.\n</details>`;
             const context = github.context;
-            if (context.eventName === "pull_request") {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: report,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                issue_number: context.payload.comment.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: report,
-              });
-            }
+            const issue_number =
+              context.eventName === "pull_request"
+                ? context.issue.number
+                : context.payload.comment.issue.number;
+            await github.rest.issues.createComment({
+              issue_number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report,
+            });
 
       - name: Upload report artifact
         if: always()
