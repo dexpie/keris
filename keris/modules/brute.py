@@ -39,9 +39,17 @@ FAILURE_MARKERS = [
 ]
 
 
-def _is_success(response: requests.Response) -> bool:
+def _is_success(response: requests.Response, login_url: str = "") -> bool:
     if response.status_code in (301, 302, 303, 307, 308):
-        # redirect setelah login = biasanya berhasil
+        # redirect setelah login: hanya dianggap berhasil bila tidak menuju
+        # kembali ke halaman login (banyak aplikasi redirect ke /login saat gagal)
+        loc = response.headers.get("Location", "").split("?")[0].lower()
+        if not loc:
+            return False
+        if login_url and loc.rstrip("/") == login_url.rstrip("/").lower():
+            return False
+        if any(m in loc for m in ("/login", "/signin", "/auth", "error")):
+            return False
         return True
     if response.status_code in (200, 201, 204):
         body = response.content[:2000].lower()
@@ -94,7 +102,7 @@ def brute_login_form(base: str, client: KerisHTTP,
                 r = client.get(target, params=data, allow_redirects=False, timeout=15)
         except requests.RequestException:
             continue
-        if _is_success(r):
+        if _is_success(r, page):
             findings.append(Finding(
                 "HIGH", "Kredensial login lemah",
                 target, f"Login berhasil dengan `{uname}` / `{pwd}`.",
@@ -232,13 +240,13 @@ def enumerate_usernames(base: str, client: KerisHTTP,
             continue
         body = r.content[:2000]
         if base_resp is not None and (r.status_code != base_resp.status_code or
-                                      abs(len(body) - len(base_resp.content or b"")) > 60):
+                                      abs(len(body) - len((base_resp.content or b"")[:2000])) > 60):
             findings.append(Finding(
                 "MEDIUM", "Username enumeration",
                 target, f"Respons berbeda untuk username `{uname}` — endpoint "
                         "membocorkan keberadaan akun.",
                 f"status: {base_resp.status_code}->{r.status_code}, "
-                f"len: {len(base_resp.content or b'')}->{len(body)}",
+                f"len: {len((base_resp.content or b'')[:2000])}->{len(body)}",
             ))
             debug(f"  enum: {uname} berbeda")
         elif any(m in body for m in ENUM_VALID_MARKERS):
@@ -298,7 +306,7 @@ def brute_extended(base: str, client: KerisHTTP,
                 r = client.get(target, params=data, allow_redirects=False, timeout=15)
         except requests.RequestException:
             continue
-        if _is_success(r):
+        if _is_success(r, page):
             findings.append(Finding(
                 "HIGH", "Kredensial login lemah (brute-force extended)",
                 target, f"Login berhasil dengan `{uname}` / `{pwd}`.",

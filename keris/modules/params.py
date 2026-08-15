@@ -28,6 +28,7 @@ def discover_hidden_params(base: str, client: KerisHTTP,
             continue
         base_len = len(r0.content or b"")
         base_status = r0.status_code
+        base_text = r0.text
 
         for param in HIDDEN_PARAMS:
             candidate = f"{full}?{urlencode({param: HIDDEN_PARAM_VALUES[0]})}"
@@ -37,9 +38,11 @@ def discover_hidden_params(base: str, client: KerisHTTP,
                 continue
             body = r.text[:2000]
             delta = abs(len(r.content or b"") - base_len)
-            reflected = HIDDEN_PARAM_VALUES[0] in body
-            # sinyal: status berubah, body jauh berbeda, atau nilai terefleksi
-            if reflected or delta > 300 or r.status_code != base_status:
+            value = HIDDEN_PARAM_VALUES[0]
+            # refleksi harus nilai baru yang tidak ada di baseline (mis. "1" selalu ada)
+            reflected = value in body and value not in base_text
+            # sinyal: status berubah, refleksi baru, atau body jauh berbeda
+            if reflected or (r.status_code != base_status and delta > 300):
                 findings.append(Finding(
                     "LOW", "Hidden parameter merespons (perlu verifikasi manual)",
                     candidate,

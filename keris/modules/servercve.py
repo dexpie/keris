@@ -67,7 +67,7 @@ SERVER_CVE_DB: Dict[str, List[Tuple[str, str, str]]] = {
 def _parse_version(ver: str) -> Tuple[int, ...]:
     m = re.match(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?", ver.strip())
     if not m:
-        return (0,)
+        return ()
     return tuple(int(g) for g in m.groups() if g is not None)
 
 
@@ -76,10 +76,15 @@ def _vuln_for(product: str, version: str) -> Optional[Tuple[str, str]]:
     if not version or product not in SERVER_CVE_DB:
         return None
     cur = _parse_version(version)
+    # versi tidak dikenal (kosong / "0" placeholder generator) bukan bukti rentan
+    if not cur or cur == (0,):
+        return None
     best = None
     for limit, sev, desc in SERVER_CVE_DB[product]:
         lim = _parse_version(limit)
-        if cur and cur <= lim:
+        if not lim or lim == (0,):
+            continue
+        if cur <= lim:
             score = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}.get(sev, 9)
             if best is None or score < best[0]:
                 best = (score, sev, desc)

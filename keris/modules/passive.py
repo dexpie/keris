@@ -88,9 +88,14 @@ def run_passive_recon(base: str) -> Dict:
     """Jalankan passive recon: subdomain via crt.sh + whois domain."""
     host = host_from_url(base)
     domain = domain_from_host(host)
-    info(f"Passive recon untuk {domain}")
+    info(f"Passive recon untuk {domain or host}")
 
     result = {"domain": domain, "host": host, "subdomains": [], "whois": None}
+
+    # domain kosong = target IP murni; tidak ada subdomain/whois yang valid
+    if not domain:
+        warn("Target berupa alamat IP; subdomain & whois dilewati")
+        return result
 
     info("Querying crt.sh (certificate transparency)...")
     subs = crt_sh_subdomains(domain)

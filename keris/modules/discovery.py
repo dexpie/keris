@@ -9,7 +9,7 @@ import requests
 
 from keris.core.http import KerisHTTP
 from keris.core.logger import info, ok, warn, debug, severity
-from keris.core.utils import extract_api_paths, extract_js_assets, urljoin, domain_from_host, host_from_url
+from keris.core.utils import extract_api_paths, extract_js_assets, urljoin, domain_from_host, host_from_url, scheme_from_url
 from keris.payloads import SECRET_PATTERNS, SENSITIVE_PATHS
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -161,6 +161,14 @@ def brute_directories(base: str, client: KerisHTTP, max_workers: int = 10,
         ok(f"Wordlist pintar: +{sum(len(load_wordlist(n)) for n in extra_names)} path spesifik {', '.join(extra_names)}")
     found = []
 
+    # baseline halaman utama: semua respons yang identik = SPA fallback (bukan temuan)
+    try:
+        home = client.get(base, timeout=15)
+        home_body = home.text[:500] if home.status_code == 200 else ""
+    except requests.RequestException:
+        home_body = ""
+    home_len = len(home_body)
+
     def check(path: str) -> Optional[dict]:
         # coba beberapa varian: path asli, trailing slash, dan query noise untuk mengalahkan
         # redirect root SPA (semua path mengembalikan index.html)
@@ -171,18 +179,29 @@ def brute_directories(base: str, client: KerisHTTP, max_workers: int = 10,
             try:
                 url = urljoin(base, cand if cand.startswith("/") else "/" + cand)
                 r = client.get(url, allow_redirects=False, timeout=12)
-                if r.status_code in (200, 301, 302, 307, 308, 401, 403):
-                    # skip respons yang identik dengan halaman utama (SPA fallback)
-                    try:
-                        body = r.text[:500]
-                    except Exception:
-                        body = ""
-                    return {
-                        "path": cand,
-                        "status": r.status_code,
-                        "size": len(r.content or b""),
-                        "body_snippet": body,
-                    }
+                status = r.status_code
+                if status in (301, 302, 307, 308):
+                    # redirect yang menuju halaman utama = SPA fallback / login biasa
+                    loc = (r.headers.get("Location") or "").split("?")[0]
+                    if loc.rstrip("/") == base.rstrip("/"):
+                        continue
+                if status not in (200, 301, 302, 307, 308, 401, 403):
+                    continue
+                try:
+                    body = r.text[:500]
+                except Exception:
+                    body = ""
+                # skip respons identik halaman utama (SPA fallback)
+                if home_body and body and body == home_body:
+                    continue
+                if status == 200 and home_body and abs(len(body) - home_len) < 20:
+                    continue
+                return {
+                    "path": cand,
+                    "status": status,
+                    "size": len(r.content or b""),
+                    "body_snippet": body,
+                }
             except requests.RequestException:
                 pass
         return None
@@ -202,12 +221,16 @@ def brute_subdomains(base: str, client: KerisHTTP, max_workers: int = 10) -> Lis
     """Brute-force subdomain umum."""
     host = host_from_url(base)
     domain = domain_from_host(host)
+    # domain_from_host mengembalikan None untuk IP murni (tidak ada subdomain valid)
+    if not domain or domain == host:
+        warn(f"Subdomain brute dilewati: target bukan domain bernama ({host})")
+        return []
     info(f"Subdomain brute pada: {domain}")
     wordlist = load_wordlist("subdomains.txt")
     if not wordlist:
         return []
     found = []
-    scheme = "https"
+    scheme = scheme_from_url(base)
 
     def check(sub: str) -> Optional[str]:
         target = f"{scheme}://{sub}.{domain}"

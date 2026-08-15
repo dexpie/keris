@@ -49,8 +49,8 @@ def _extract_forms(html: str) -> List[dict]:
         tag = m.group(0)
         action = re.search(r'action=["\']([^"\']*)["\']', tag, re.IGNORECASE)
         method = re.search(r'method=["\']([^"\']*)["\']', tag, re.IGNORECASE)
-        end = html.find("</form>", m.end())
-        inner = html[m.end():end] if end != -1 else html[m.end():m.end() + 5000]
+        end_m = re.search(r"</form>", html[m.end():], re.IGNORECASE)
+        inner = html[m.end():m.end() + end_m.start()] if end_m else html[m.end():m.end() + 5000]
         fields = {}
         for inp in re.finditer(r"<input[^>]*>", inner, re.IGNORECASE):
             t = inp.group(0)
@@ -58,9 +58,11 @@ def _extract_forms(html: str) -> List[dict]:
             type_ = re.search(r'type=["\']([^"\']*)["\']', t, re.IGNORECASE)
             value = re.search(r'value=["\']([^"\']*)["\']', t, re.IGNORECASE)
             if name:
+                checked = re.search(r'checked\s*(?:=\s*["\']?[^"\']*["\']?)?', t, re.IGNORECASE)
                 fields[name.group(1)] = {
                     "type": (type_.group(1) if type_ else "text").lower(),
                     "value": (value.group(1) if value else ""),
+                    "checked": bool(checked),
                 }
         forms.append({
             "action": action.group(1) if action else "",
@@ -81,24 +83,64 @@ def _pick_login_candidate(forms: List[dict]) -> Optional[dict]:
     return None
 
 
+def _field_score(name: str, kind: str) -> int:
+    """Skor kecocokan field login. Semakin tinggi semakin cocok."""
+    lower = name.lower()
+    if kind == "password":
+        if lower in ("password", "pass", "passwd", "pwd"):
+            return 5
+        if "password" in lower or "passwd" in lower:
+            return 4
+        if lower.startswith("pass") or "pass" in lower.split("_") or "pass" in lower.split("-"):
+            return 3
+        return 1
+    # username/email
+    if lower in ("username", "user", "email", "login", "userid", "user_id"):
+        return 5
+    if "username" in lower or "userid" in lower:
+        return 4
+    if lower in ("account", "acct"):
+        return 3
+    if lower.startswith("user") or "user" in lower.split("_") or "user" in lower.split("-"):
+        return 3
+    if "email" in lower or "mail" in lower:
+        return 3
+    return 1
+
+
 def _auto_fill(form: dict, username: str, password: str) -> dict:
-    """Isi field form dengan kredensial; pertahankan nilai hidden/CSRF."""
+    """Isi field form dengan kredensial; pertahankan nilai hidden/CSRF.
+
+    - Field dipilih berdasarkan skor kecocokan (bukan last-match-wins).
+    - Checkbox/radio yang tidak dicentang tidak ikut dikirim.
+    - Textarea/input kosong yang bukan user/pass/hidden tetap dikirim sesuai
+      nilai aslinya (perilaku browser).
+    """
     data = {}
-    user_key = pass_key = None
+    candidates_user = []
+    candidates_pass = []
     for name, meta in form["fields"].items():
-        lower = name.lower()
-        if "pass" in lower:
-            pass_key = name
-        elif "email" in lower or "user" in lower or "login" in lower or "username" in lower:
-            user_key = name
+        kind = meta["type"]
+        if kind == "password":
+            candidates_pass.append((_field_score(name, "password"), name))
+        elif kind == "text" or kind == "email":
+            candidates_user.append((_field_score(name, "text"), name))
+
+    user_key = max(candidates_user)[1] if candidates_user else None
+    pass_key = max(candidates_pass)[1] if candidates_pass else None
+
     for name, meta in form["fields"].items():
+        kind = meta["type"]
         if name == user_key:
             data[name] = username
         elif name == pass_key:
             data[name] = password
-        elif meta["type"] in ("hidden", "submit", "button"):
+        elif kind in ("checkbox", "radio"):
+            if meta.get("checked"):
+                data[name] = meta["value"] or "on"
+        elif kind in ("hidden", "submit", "button", "image", "reset"):
             data[name] = meta["value"]
-        else:
+        elif kind in ("text", "email", "tel", "url", "number", "date", "search", "textarea"):
             data[name] = meta["value"]
     return data
 

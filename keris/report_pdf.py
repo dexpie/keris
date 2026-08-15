@@ -1,6 +1,8 @@
 """Generator laporan PDF mandiri menggunakan reportlab."""
 
+import re
 from typing import List
+from xml.sax.saxutils import escape as _xml_escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -10,6 +12,29 @@ from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
 
 from keris import __version__
+
+# Tag markup yang diizinkan di dalam string Paragraph reportlab.
+_ALLOWED_TAGS = re.compile(
+    r"</?(?:b|i|u|font|a|br)\b[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def _esc(text) -> str:
+    """Escape teks agar aman untuk Paragraph reportlab, tanpa merusak tag markup kita."""
+    if text is None:
+        return ""
+    s = str(text)
+    hold = []
+    def _keep(match):
+        hold.append(match.group(0))
+        return f"\x00{len(hold) - 1}\x00"
+    s = _ALLOWED_TAGS.sub(_keep, s)
+    s = _xml_escape(s)
+    def _restore(match):
+        return hold[int(match.group(0)[1:-1])]
+    return re.sub(r"\x00\d+\x00", _restore, s)
+
 
 _SEV_COLORS = {
     "CRITICAL": colors.HexColor("#B00020"),
@@ -44,7 +69,7 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
     story = []
     story.append(Paragraph("Keris Pentest Report", h1))
     story.append(Paragraph(
-        f"Target: {base}<br/>Keris v{__version__} — {options.get('mode', '')}",
+        f"Target: {_esc(base)}<br/>Keris v{__version__} — {_esc(options.get('mode', ''))}",
         small,
     ))
     story.append(Spacer(1, 6 * mm))
@@ -75,9 +100,9 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
 
     # Host / stack
     host = recon.get("host") or base
-    story.append(Paragraph(f"Target: {host}", h2))
+    story.append(Paragraph(f"Target: {_esc(host)}", h2))
     story.append(Paragraph(
-        f"Stack: {', '.join(recon.get('stack', [])) or 'tidak diketahui'}",
+        f"Stack: {_esc(', '.join(recon.get('stack', [])) or 'tidak diketahui')}",
         normal,
     ))
     story.append(Spacer(1, 4 * mm))
@@ -110,23 +135,23 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
 
         cvss = classify(f.get("title", ""), sev)
         story.append(Paragraph(
-            f"{i}. [{sev}] {f.get('title', '')}",
+            f"{i}. [{sev}] {_esc(f.get('title', ''))}",
             ParagraphStyle(f"f{i}", parent=normal, textColor=color,
                            fontName="Helvetica-Bold"),
         ))
         story.append(Paragraph(
-            f"<b>Endpoint:</b> {f.get('endpoint', '')}",
+            f"<b>Endpoint:</b> {_esc(f.get('endpoint', ''))}",
             small,
         ))
         story.append(Paragraph(
-            f"<b>CVSS v3.1:</b> {cvss['score']} ({cvss['vector']}) &nbsp; "
-            f"<b>OWASP:</b> {cvss['owasp_code']} {cvss['owasp_name']}",
+            f"<b>CVSS v3.1:</b> {_esc(str(cvss['score']))} ({_esc(cvss['vector'])}) &nbsp; "
+            f"<b>OWASP:</b> {_esc(cvss['owasp_code'])} {_esc(cvss['owasp_name'])}",
             small,
         ))
-        story.append(Paragraph(f"<b>Detail:</b> {f.get('detail', '')}", normal))
+        story.append(Paragraph(f"<b>Detail:</b> {_esc(f.get('detail', ''))}", normal))
         if f.get("evidence"):
             story.append(Paragraph(
-                f"<b>Bukti:</b> <font size='8' face='Courier'>{f['evidence'][:1000]}</font>",
+                f"<b>Bukti:</b> <font size='8' face='Courier'>{_esc(f['evidence'][:1000])}</font>",
                 normal,
             ))
         story.append(Spacer(1, 3 * mm))
@@ -139,6 +164,6 @@ def write_pdf_report(recon: dict, disc: dict, findings: List[dict],
         if sev in ("HIGH", "CRITICAL"):
             recs.append(f"Perbaiki segera: {f.get('title', '')} — {f.get('detail', '')}")
     for r in (recs or ["Tidak ada rekomendasi otomatis."])[:10]:
-        story.append(Paragraph(f"• {r}", normal))
+        story.append(Paragraph(f"• {_esc(r)}", normal))
 
     doc.build(story)

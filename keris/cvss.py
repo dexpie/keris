@@ -102,10 +102,11 @@ def _cvss_score(vector: str) -> float:
     if impact <= 0:
         return 0.0
     if _g("S", "U") == "U":
-        base = round(min(impact + exploitability, 10), 1)
+        base = min(impact + exploitability, 10)
     else:
-        base = round(min(1.08 * (impact + exploitability), 10), 1)
-    return base
+        base = min(1.08 * (impact + exploitability), 10)
+    # CVSS v3.1 menggunakan roundup: pembulatan ke atas ke 1 desimal terdekat
+    return math.ceil(base * 10) / 10
 
 
 def _severity_from_score(score: float) -> str:
@@ -136,10 +137,15 @@ def classify(title: str, severity: str = "") -> Dict:
         matched = SEVERITY_FALLBACK.get(sev, SEVERITY_FALLBACK["INFO"])
     vector, code, name = matched
     score = _cvss_score(vector)
+    # severity yang dilaporkan mengikuti label temuan (bukan turunan skor),
+    # agar tidak ada kontradiksi antara badge temuan dan kolom CVSS.
+    reported = (severity or "INFO").upper()
+    if reported not in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+        reported = "INFO"
     return {
         "vector": vector,
         "score": round(score, 1),
-        "severity": _severity_from_score(score),
+        "severity": reported,
         "owasp_code": code,
         "owasp_name": name,
     }

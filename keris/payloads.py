@@ -161,7 +161,7 @@ CMDI_PAYLOADS = [
 
 # Indikator output perintah yang berhasil dieksekusi
 CMDI_OUTPUT_MARKERS = [
-    "uid=", "gid=", "groups=", "root:x:0", "uid 0", "linux",
+    "uid=", "gid=", "groups=", "root:x:0", "uid 0",
 ]
 
 # Server-Side Template Injection (SSTI)

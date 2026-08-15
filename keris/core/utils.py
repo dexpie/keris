@@ -82,8 +82,15 @@ def extract_js_assets(html: str, base: str) -> set:
 
 
 def domain_from_host(host: str) -> str:
-    """Ambil domain tingkat kedua+ dari host (mis. sub.example.co.id -> example.co.id)."""
-    parts = host.lower().split(".")
+    """Ambil domain tingkat kedua+ dari host (mis. sub.example.co.id -> example.co.id).
+
+    Mengembalikan string kosong untuk alamat IP, karena tidak ada subdomain
+    yang valid untuk IP. Menghapus port bila ada.
+    """
+    host = host.split(":")[0].lower()
+    if not host or re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
+        return ""
+    parts = host.split(".")
     if len(parts) <= 2:
         return host
     # heuristic sederhana: jika punya ccTLD dua huruf, ambil 3 part terakhir

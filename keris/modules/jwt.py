@@ -41,6 +41,8 @@ def decode_jwt(token: str) -> Optional[dict]:
         payload = json.loads(_b64_decode(parts[1]).decode("utf-8", errors="replace"))
     except Exception:
         return None
+    if not isinstance(header, dict) or not isinstance(payload, dict):
+        return None
     return {"header": header, "payload": payload, "parts": parts}
 
 
@@ -76,7 +78,7 @@ def analyze_jwt(token: str) -> List[Finding]:
     header = decoded["header"]
     payload = decoded["payload"]
     parts = decoded["parts"]
-    alg = header.get("alg", "none")
+    alg = str(header.get("alg", "none"))
 
     # 1. algoritma none / blank
     if alg.lower() == "none" or not alg:
@@ -117,6 +119,11 @@ def analyze_jwt(token: str) -> List[Finding]:
 
     # 4. expiry & not-before
     exp = payload.get("exp")
+    if isinstance(exp, str):
+        try:
+            exp = float(exp)
+        except ValueError:
+            exp = None
     now = time.time()
     if exp is None:
         findings.append(Finding(
@@ -132,7 +139,12 @@ def analyze_jwt(token: str) -> List[Finding]:
             "Token sudah lewat waktu kedaluwarsa (exp).",
             f"exp: {exp}, now: {int(now)}",
         ))
-    if payload.get("nbf") is not None and isinstance(payload["nbf"], (int, float)) and payload["nbf"] > now:
+    if isinstance(payload.get("nbf"), str):
+        try:
+            payload["nbf"] = float(payload["nbf"])
+        except ValueError:
+            pass
+    if isinstance(payload.get("nbf"), (int, float)) and payload["nbf"] > now:
         findings.append(Finding(
             "INFO", "JWT not-before di masa depan",
             "jwt-payload",

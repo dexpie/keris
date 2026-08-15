@@ -259,7 +259,14 @@ def scan_internal_ports(base: str, client, vuln_url: str, vuln_param: str,
         # 502/503/504 = gateway error -> port tertutup (SSRF fetch gagal konek)
         if code in (502, 503, 504):
             continue
-        if code in (200, 301, 302, 401, 403) or len(body) > 0:
+        # hanya status yang jelas "ada service" dianggap terbuka. Respons 200
+        # pun bisa berupa halaman error app (false positive), jadi verifikasi
+        # bahwa body bukan halaman 404/error umum aplikasi.
+        if code in (200, 301, 302, 401, 403):
+            low = body.lower()[:500]
+            if any(m in low for m in ("404 not found", "cannot connect", "connection refused",
+                                      "no route to host", "failed to connect")):
+                continue
             open_ports.append((port, service, code, body[:120]))
     if open_ports:
         findings.append({

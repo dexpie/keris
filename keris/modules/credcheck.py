@@ -67,12 +67,13 @@ def _try_form_login(base: str, client: requests.Session,
         else:
             resp = client.post(action, data=data, timeout=8, allow_redirects=True)
         result["status"] = resp.status_code
-        result["ok"] = resp.status_code in (200, 302, 303) and (
-            "logout" in resp.text.lower()
-            or "welcome" in resp.text.lower()
-            or "dashboard" in resp.text.lower()
-            or "salah" not in resp.text.lower() and "invalid" not in resp.text.lower()
-        )
+        # sukses hanya bila ada marker sukses eksplisit DAN tidak ada marker gagal
+        body = resp.text.lower()
+        success = ("logout" in body or "welcome" in body or "dashboard" in body
+                   or "selamat" in body or "berhasil" in body or "account" in body)
+        failed = ("salah" in body or "invalid" in body or "incorrect" in body
+                  or "gagal" in body or "forbidden" in body or "denied" in body)
+        result["ok"] = resp.status_code in (200, 302, 303) and success and not failed
         result["body_sample"] = resp.text[:120]
     except requests.RequestException as e:
         result["body_sample"] = str(e)[:120]
@@ -86,7 +87,11 @@ def _try_basic_auth(base: str, client: requests.Session,
     try:
         r = client.get(base, auth=(username, password), timeout=8, allow_redirects=True)
         result["status"] = r.status_code
-        result["ok"] = r.status_code in (200, 302, 303) and "401" not in str(r.status_code)
+        # redirect akhir ke halaman login = gagal; selain itu 200/302 = sukses
+        final = r.url.lower() if r.url else ""
+        bounced_to_login = any(p in final for p in ("/login", "/signin", "/auth")) \
+            and r.status_code in (200, 302, 303)
+        result["ok"] = r.status_code in (200, 302, 303) and not bounced_to_login
         result["body_sample"] = r.text[:120]
     except requests.RequestException as e:
         result["body_sample"] = str(e)[:120]

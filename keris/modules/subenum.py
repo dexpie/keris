@@ -46,7 +46,6 @@ def detect_wildcard(domain: str, timeout: float = 5.0) -> Tuple[bool, List[str]]
         return True, ips
     return True, ips
 
-
 def crt_sh(domain: str, timeout: float = 20.0) -> List[str]:
     """Ambil subdomain dari crt.sh (certificate transparency)."""
     try:
@@ -104,7 +103,9 @@ def enumerate_subdomains(domain: str, wordlist: Optional[List[str]] = None,
 
     subs: List[str] = []
     if use_crt:
-        crt = crt_sh(domain, timeout=timeout)
+        # crt.sh adalah HTTP request lambat; gunakan timeout lebih longgar
+        # (bukan timeout DNS yang 5 detik)
+        crt = crt_sh(domain, timeout=max(timeout * 4, 20.0))
         if crt:
             ok(f"crt.sh: {len(crt)} subdomain")
             subs.extend(crt)
@@ -116,6 +117,15 @@ def enumerate_subdomains(domain: str, wordlist: Optional[List[str]] = None,
         if br:
             ok(f"Brute: {len(br)} subdomain hidup")
             subs.extend(br)
+
+    # bila wildcard aktif, buang hasil brute yang mengarah ke IP wildcard
+    # (subdomain "hidup" itu hanya efek wildcard, bukan subdomain nyata)
+    if wildcard and wildcard_ips:
+        filtered = [s for s in subs if not (set(_resolve(s, timeout=timeout)) & set(wildcard_ips))]
+        dropped = len(subs) - len(filtered)
+        if dropped:
+            warn(f"{dropped} subdomain dibuang karena wildcard DNS")
+        subs = filtered
 
     subs = _dedup(subs)
     if subs:

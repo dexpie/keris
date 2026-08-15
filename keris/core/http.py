@@ -113,6 +113,7 @@ class KerisHTTP:
 
         kwargs.setdefault("timeout", self.timeout)
         kwargs.setdefault("verify", not self.insecure)
+        kwargs.setdefault("auth", self.basic_auth)
         try:
             # throttle untuk menghindari overload / deteksi rate limit
             wait = self.delay

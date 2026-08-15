@@ -15,7 +15,7 @@ import requests
 
 from keris.core.logger import debug, info, ok, warn
 from keris.modules.scanner import Finding
-from keris.core.utils import host_from_url
+from keris.core.utils import host_from_url, domain_from_host
 
 CDX_API = "https://web.archive.org/cdx/search/cdx"
 
@@ -99,8 +99,10 @@ def _interesting(path: str) -> bool:
 def mine_urls(base: str, limit: int = 500, timeout: int = 30) -> Dict:
     """Mining URL historis. Kembalikan dict {urls, interesting, count}."""
     host = host_from_url(base)
-    info(f"=== WAYBACK MINING ({host}) ===")
-    entries = fetch_wayback_urls(host, limit=limit, timeout=timeout)
+    # CDX archive.org memakai nama domain tanpa port
+    domain = domain_from_host(host) or host.split(":")[0]
+    info(f"=== WAYBACK MINING ({domain}) ===")
+    entries = fetch_wayback_urls(domain, limit=limit, timeout=timeout)
     urls = list(dict.fromkeys(e.get("original", "") for e in entries if e.get("original")))
     if not urls:
         warn("Tidak ada data Wayback untuk host ini")

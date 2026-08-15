@@ -73,6 +73,32 @@ def _redact(value: str) -> str:
     return value[:4] + "…" * 4 + value[-4:]
 
 
+def _git_content_valid(p: str, content: bytes) -> bool:
+    """Validasi bahwa konten respons benar-benar file git, bukan halaman 404 palsu.
+
+    Banyak aplikasi (SPA/React) mengembalikan status 200 untuk path apa pun,
+    sehingga status 200 saja tidak cukup sebagai bukti .git terekspos.
+    """
+    if not content:
+        return False
+    if p == "/.git/HEAD":
+        # HEAD git selalu dimulai "ref: refs/..." atau berisi hash 40-hex
+        text = content[:200].strip()
+        return text.startswith(b"ref:") or bool(re.fullmatch(rb"[0-9a-f]{40}", text))
+    if p == "/.git/config":
+        return b"[core]" in content[:2000] or b"repositoryformatversion" in content[:2000]
+    if p == "/.git/index":
+        return content.startswith(GIT_INDEX_HEADER)
+    if p == "/.git/description":
+        return content.strip().startswith(b"Unnamed repository")
+    if p in ("/.git/logs/HEAD",):
+        return content.startswith(b"0000000000000000000000000000000000000000")
+    if p == "/.git/packed-refs":
+        return b"# pack-refs with:" in content[:2000]
+    # fallback: file git teks biasanya pendek, bukan HTML
+    return not content[:200].lstrip().startswith(b"<")
+
+
 def _check_git(client: KerisHTTP, base: str) -> List[Dict]:
     findings = []
     git_ok = False
@@ -83,7 +109,7 @@ def _check_git(client: KerisHTTP, base: str) -> List[Dict]:
             r = client.get(base.rstrip("/") + p, timeout=15)
         except requests.RequestException:
             continue
-        if r.status_code == 200 and r.content[:5].strip():
+        if r.status_code == 200 and _git_content_valid(p, r.content):
             git_ok = True
             info(f".git terdeteksi: {p} (200)")
             if p == "/.git/HEAD":
@@ -222,7 +248,6 @@ def _verify_aws(key_id: str, secret: str) -> Tuple[bool, str]:
 def run_hunt(base: str, client: KerisHTTP, verify: bool = False,
              extra_urls: Optional[List[str]] = None) -> List[Dict]:
     """Hunt credentials. Returns findings."""
-    info("=== HUNT ===")
     findings: List[Dict] = []
 
     # 1. .git exposure

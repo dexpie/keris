@@ -10,10 +10,13 @@ SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
 
 def _esc(text: str) -> str:
-    """Escape karakter markdown berbahaya."""
+    """Escape karakter markdown berbahaya (pipa tabel, backtick, newline)."""
     if not text:
         return ""
-    return str(text).replace("|", "\\|").replace("\n", " ")
+    return (str(text)
+            .replace("|", "\\|")
+            .replace("`", "\\`")
+            .replace("\n", " "))
 
 
 def _severity_badge(sev: str) -> str:
@@ -96,12 +99,12 @@ def generate_report(
     lines.append("|---|---|")
     lines.append(f"| URL | `{_esc(target)}` |")
     lines.append(f"| Host | `{_esc(recon.get('host', ''))}` |")
-    lines.append(f"| IP | `{', '.join(recon.get('ips', []))}` |")
+    lines.append(f"| IP | `{_esc(', '.join(recon.get('ips', [])))}` |")
     lines.append(f"| Server | `{_esc(recon.get('server_header', 'n/a'))}` |")
     if recon.get("status_code"):
-        lines.append(f"| HTTP Status | `{recon.get('status_code')}` |")
+        lines.append(f"| HTTP Status | `{_esc(str(recon.get('status_code')))}` |")
     if recon.get("stack"):
-        lines.append(f"| Stack | `{', '.join(recon.get('stack', []))}` |")
+        lines.append(f"| Stack | `{_esc(', '.join(recon.get('stack', [])))}` |")
     if recon.get("has_redirect"):
         lines.append(f"| Redirect ke | `{_esc(recon.get('final_url', ''))}` |")
     lines.append("")
@@ -136,13 +139,13 @@ def generate_report(
         lines.append("### Endpoint API")
         lines.append("")
         for ep in discovery["api_endpoints"][:60]:
-            lines.append(f"- `{ep}`")
+            lines.append(f"- `{_esc(ep)}`")
         lines.append("")
     if discovery.get("secrets"):
         lines.append("### Secret Potensial")
         lines.append("")
         for s in discovery["secrets"]:
-            lines.append(f"- **{s['type']}:** `{s['match']}`")
+            lines.append(f"- **{_esc(s['type'])}:** `{_esc(s['match'])}`")
         lines.append("")
 
     # Temuan
@@ -163,33 +166,33 @@ def generate_report(
         lines.append("## 6. Attack Paths")
         lines.append("")
         for f in sorted(chains, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "HIGH").upper(), 9)):
-            lines.append(f"### [{f.get('severity', 'HIGH')}] {f.get('title', '')}")
+            lines.append(f"### [{f.get('severity', 'HIGH')}] {_esc(f.get('title', ''))}")
             lines.append("")
-            lines.append(f"**Tujuan akhir:** `{f.get('endpoint', '')}`")
+            lines.append(f"**Tujuan akhir:** `{_esc(f.get('endpoint', ''))}`")
             lines.append("")
             ev = f.get("evidence", "") or ""
             steps = [s.strip() for s in ev.replace("Chain terbentuk dari:", "").split(";") if s.strip()]
             for idx, s in enumerate(steps, 1):
-                lines.append(f"{idx}. {s}")
+                lines.append(f"{idx}. {_esc(s)}")
             lines.append("")
-            lines.append(f"**Mengapa kritis:** {f.get('detail', '')}")
+            lines.append(f"**Mengapa kritis:** {_esc(f.get('detail', ''))}")
             lines.append("")
 
     if findings:
         lines.append("### Detail")
         lines.append("")
         for i, f in enumerate(sorted(findings, key=lambda x: SEVERITY_ORDER.get(x.get("severity", "INFO").upper(), 9)), 1):
-            lines.append(f"#### {i}. [{f.get('severity', 'INFO')}] {f.get('title', '')}")
+            lines.append(f"#### {i}. [{f.get('severity', 'INFO')}] {_esc(f.get('title', ''))}")
             lines.append("")
-            lines.append(f"**Lokasi:** `{f.get('endpoint', '')}`")
+            lines.append(f"**Lokasi:** `{_esc(f.get('endpoint', ''))}`")
             lines.append("")
             cvss = classify(f.get("title", ""), f.get("severity", ""))
             lines.append(
-                f"**CVSS v3.1:** {cvss['score']} (`{cvss['vector']}`) · "
-                f"**OWASP:** {cvss['owasp_code']} {cvss['owasp_name']}"
+                f"**CVSS v3.1:** {cvss['score']} (`{_esc(cvss['vector'])}`) · "
+                f"**OWASP:** {_esc(cvss['owasp_code'])} {_esc(cvss['owasp_name'])}"
             )
             lines.append("")
-            lines.append(f"**Detail:** {f.get('detail', '')}")
+            lines.append(f"**Detail:** {_esc(f.get('detail', ''))}")
             lines.append("")
             if f.get("evidence"):
                 lines.append("**Bukti:**")
