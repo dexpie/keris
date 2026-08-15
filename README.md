@@ -835,6 +835,30 @@ Use only on systems you own or that have given you written permission. Active
 attack modules (exploit, CVE, brute-force extended, DoS) require explicit
 confirmation. All responsibility lies with the user.
 
+## Screenshots
+
+Overpowered kit modules (v0.10.0), all running with `--authorized`:
+
+<p align="center">
+  <img src="docs/screenshots/gitdump.png" alt="keris gitdump - .git dump" width="420">
+  <img src="docs/screenshots/dbdump.png" alt="keris dbdump - database dump" width="420">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/authbypass.png" alt="keris authbypass - access control bypass" width="420">
+  <img src="docs/screenshots/spray.png" alt="keris spray - password spraying" width="420">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/k8s.png" alt="keris k8s - kubernetes API attack" width="420">
+  <img src="docs/screenshots/crack.png" alt="keris crack - offline hash cracking" width="420">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/cloud.png" alt="keris cloud - cloud takeover checks" width="420">
+  <img src="docs/screenshots/xsshook.png" alt="keris xsshook - capture server" width="420">
+</p>
+
 ---
 
 [MIT](LICENSE) — use it, learn from it, improve it. Contributions welcome; see

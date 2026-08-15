@@ -2675,6 +2675,7 @@ def _cmd_cloud(args, cfg, overrides) -> int:
             r = check_bucket_takeover(b)
             if r:
                 out.append(r)
+        ok(f"Cloud check selesai: {len(out)} temuan")
     finally:
         client.close()
     if args.json_output:
