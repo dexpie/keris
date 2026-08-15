@@ -486,6 +486,112 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     prb.add_argument("--authorized", action="store_true",
                      help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
 
+    # gitdump (full .git dump & source recovery)
+    pgd = sub.add_parser("gitdump", parents=[common],
+                         help="Full .git dump: unduh object & rekonstruksi source code (wajib --authorized)")
+    pgd.add_argument("--outdir", default="", help="Direktori output (default: ./.gitdump-<host>)")
+    pgd.add_argument("--max-objects", type=int, default=300, help="Maksimum blob diunduh")
+    pgd.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    pgd.add_argument("--json-output", help="File output JSON")
+
+    # authbypass (multi-teknik bypass auth)
+    pab = sub.add_parser("authbypass", parents=[common],
+                         help="Uji bypass kontrol akses: verb tampering, path normalization, role pollution (wajib --authorized)")
+    pab.add_argument("--endpoint", action="append", default=[],
+                     help="Endpoint terproteksi yang diuji (dapat diulang). Default: admin/dashboard/dll")
+    pab.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    pab.add_argument("--json-output", help="File output JSON")
+    pab.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                     help="Severity minimum yang menyebabkan exit code 1")
+
+    # spray (mass password spraying)
+    psp = sub.add_parser("spray", parents=[common],
+                         help="Password spraying anti-lockout: 1 password per akun (wajib --authorized)")
+    psp.add_argument("--users", default=None,
+                     help="Daftar username dipisah koma (user1,user2,user3)")
+    psp.add_argument("--users-file", default=None,
+                     help="File username (satu per baris)")
+    psp.add_argument("--passwords", default=None,
+                     help="Daftar password dipisah koma (override default)")
+    psp.add_argument("--passwords-file", default=None,
+                     help="File password (satu per baris)")
+    psp.add_argument("--auth-type", choices=["auto", "form", "basic", "json"], default="auto",
+                     help="Metode auth (default: auto)")
+    psp.add_argument("--spray-delay", type=float, default=0.5, dest="spray_delay",
+                     help="Jeda antar percobaan (detik, untuk hindari rate-limit)")
+    psp.add_argument("--proxy-file", default=None,
+                     help="File proxy (satu per baris, untuk rotasi)")
+    psp.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk serangan aktif")
+    psp.add_argument("--json-output", help="File output JSON")
+
+    # dbdump (full database dump)
+    pdd = sub.add_parser("dbdump", parents=[common],
+                         help="Dump database penuh dari SQLi UNION (wajib --authorized)")
+    pdd.add_argument("--vuln-url", required=True,
+                     help="URL parameter SQLi yang rentan (mis. http://host/search?id=1)")
+    pdd.add_argument("--vuln-param", required=True, help="Nama parameter SQLi")
+    pdd.add_argument("--db", default="", help="Tipe DB (MySQL/PostgreSQL/MSSQL/SQLite); auto jika kosong")
+    pdd.add_argument("--cols", type=int, default=0, help="Jumlah kolom UNION; auto jika 0")
+    pdd.add_argument("--outdir", default=".", help="Direktori output hasil dump")
+    pdd.add_argument("--max-tables", type=int, default=10, help="Maksimum tabel di-dump")
+    pdd.add_argument("--max-rows", type=int, default=50, help="Maksimum baris per tabel")
+    pdd.add_argument("--workers", type=int, default=4, help="Thread paralel dump")
+    pdd.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    pdd.add_argument("--json-output", help="File output JSON")
+
+    # cloud (cloud account takeover)
+    pcld = sub.add_parser("cloud", parents=[common],
+                          help="Verifikasi & takeover cloud: AWS key, S3 bucket, GCP/Azure (wajib --authorized)")
+    pcld.add_argument("--from-scan", default=None,
+                      help="File JSON hasil scan/hunt berisi temuan secret cloud")
+    pcld.add_argument("--bucket", action="append", default=[],
+                      help="Nama S3 bucket untuk dicek (dapat diulang)")
+    pcld.add_argument("--authorized", action="store_true",
+                      help="KONFIRMASI izin tertulis untuk verifikasi kredensial cloud")
+    pcld.add_argument("--json-output", help="File output JSON")
+
+    # xsshook (XSS hook/c2 capture)
+    pxh = sub.add_parser("xsshook", parents=[common],
+                         help="XSS hook server: buktikan dampak XSS (cookie/keylog/DOM capture) (wajib --authorized --yes)")
+    pxh.add_argument("--bind", default="127.0.0.1", help="Host untuk bind server")
+    pxh.add_argument("--port", type=int, default=0, help="Port server (0 = acak)")
+    pxh.add_argument("--yes", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk menjalankan server")
+    pxh.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+
+    # k8s (Kubernetes cluster attack)
+    pk8 = sub.add_parser("k8s", parents=[common],
+                         help="Enum & uji akses Kubernetes API (langsung atau via SSRF pivot) (wajib --authorized)")
+    pk8.add_argument("--ssrf-url", default="",
+                     help="URL parameter SSRF untuk pivot ke k8s internal")
+    pk8.add_argument("--ssrf-param", default="",
+                     help="Nama parameter SSRF untuk pivot")
+    pk8.add_argument("--k8s-base", default="", dest="k8s_base",
+                     help="Base URL API k8s (default: dari target)")
+    pk8.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    pk8.add_argument("--json-output", help="File output JSON")
+
+    # crack (hash cracking)
+    pcr = sub.add_parser("crack", parents=[common],
+                         help="Crack hash offline: MD5/SHA1/SHA256/NTLM/MD5-Crypt (wajib --authorized)")
+    pcr.add_argument("--hash", action="append", default=[],
+                     help="Hash untuk dicrack (dapat diulang)")
+    pcr.add_argument("--hashes-file", default=None,
+                     help="File hash (satu per baris)")
+    pcr.add_argument("--wordlist", default=None,
+                     help="File wordlist kustom (satu password per baris)")
+    pcr.add_argument("--brute-length", type=int, default=0,
+                     help="Uji brute charset pendek sampai panjang ini (opsional, lambat)")
+    pcr.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk cracking hash target")
+    pcr.add_argument("--json-output", help="File output JSON")
+
     return p.parse_args(argv)
 
 
@@ -2421,6 +2527,243 @@ def _cmd_rebind(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_gitdump(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("GIT DUMP")
+    if not getattr(args, "authorized", False):
+        error("gitdump memerlukan --authorized.")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            from keris.modules.gitdump import dump_git
+            fnds = dump_git(base, client, outdir=args.outdir,
+                            max_objects=args.max_objects, authorized=True)
+            all_findings.extend(f.to_dict() for f in fnds)
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "gitdump", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_authbypass(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("AUTH BYPASS")
+    if not getattr(args, "authorized", False):
+        error("authbypass memerlukan --authorized.")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            from keris.modules.authbypass import test_bypass
+            fnds = test_bypass(base, client, endpoints=args.endpoint,
+                               authorized=True)
+            all_findings.extend(f.to_dict() for f in fnds)
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "authbypass", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_spray(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("PASSWORD SPRAY")
+    if not getattr(args, "authorized", False):
+        error("spray memerlukan --authorized.")
+        return EXIT_ERROR
+    usernames = []
+    if args.users:
+        usernames.extend(u.strip() for u in args.users.split(",") if u.strip())
+    if args.users_file:
+        with open(args.users_file, "r", encoding="utf-8") as f:
+            usernames.extend(l.strip() for l in f if l.strip())
+    passwords = None
+    if args.passwords:
+        passwords = [p.strip() for p in args.passwords.split(",") if p.strip()]
+    if args.passwords_file:
+        with open(args.passwords_file, "r", encoding="utf-8") as f:
+            passwords = [l.strip() for l in f if l.strip()]
+    proxies = None
+    if args.proxy_file:
+        with open(args.proxy_file, "r", encoding="utf-8") as f:
+            proxies = [l.strip() for l in f if l.strip()]
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            from keris.modules.spray import spray
+            fnds = spray(base, client, usernames, passwords,
+                         auth_type=args.auth_type, delay=args.spray_delay,
+                         proxies=proxies, authorized=True)
+            all_findings.extend(f.to_dict() for f in fnds)
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "spray", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_dbdump(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("DATABASE DUMP")
+    if not getattr(args, "authorized", False):
+        error("dbdump memerlukan --authorized.")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    base = normalize_url(targets[0]) if targets else ""
+    client = _make_client(args, cfg, overrides, base)
+    try:
+        from keris.modules.dbdump import dump_db
+        fnds = dump_db(base, client, args.vuln_url, args.vuln_param,
+                       db=args.db, total_cols=args.cols, outdir=args.outdir,
+                       max_tables=args.max_tables, max_rows=args.max_rows,
+                       workers=args.workers, authorized=True)
+    finally:
+        client.close()
+    all_findings = [f.to_dict() for f in fnds]
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "dbdump", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_cloud(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("CLOUD TAKEOVER")
+    if not getattr(args, "authorized", False):
+        error("cloud memerlukan --authorized.")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    base = normalize_url(targets[0]) if targets else "http://cloud/"
+    client = _make_client(args, cfg, overrides, base)
+    try:
+        findings_in = []
+        if args.from_scan:
+            with open(args.from_scan, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            findings_in = data.get("findings", data if isinstance(data, list) else [])
+        from keris.modules.cloudtakeover import (check_bucket_takeover,
+                                                 scan_cloud)
+        out = scan_cloud(base, client, findings_in, authorized=True)
+        for b in args.bucket:
+            r = check_bucket_takeover(b)
+            if r:
+                out.append(r)
+    finally:
+        client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "cloud", "findings": out},
+                      f, indent=2, default=str)
+    return _exit_code(out, getattr(args, "exit_on", "high"))
+
+
+def _cmd_xsshook(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("XSS HOOK")
+    if not getattr(args, "authorized", False) or not getattr(args, "yes", False):
+        error("xsshook memerlukan --authorized DAN --yes.")
+        return EXIT_ERROR
+    from keris.modules.xsshook import start_hook
+
+    srv = start_hook(host=args.bind, port=args.port, authorized=True, yes=True)
+    if srv is None:
+        return EXIT_ERROR
+    try:
+        import time as _t
+        info("Menunggu korban/tes... (Ctrl+C untuk berhenti)")
+        while True:
+            _t.sleep(1)
+            if srv.count and srv.data.get("events"):
+                ev = srv.data["events"][-1]
+                info(f"  CAPTURE: {ev.get('url', '?')} | cookie={str(ev.get('cookie'))[:60]}")
+    except KeyboardInterrupt:
+        ok(f"XSS hook berhenti; {srv.count} event tertangkap")
+    finally:
+        srv.stop()
+    return EXIT_OK
+
+
+def _cmd_k8s(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("KUBERNETES ATTACK")
+    if not getattr(args, "authorized", False):
+        error("k8s memerlukan --authorized.")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    base = normalize_url(args.k8s_base) if args.k8s_base else normalize_url(targets[0])
+    client = _make_client(args, cfg, overrides, base)
+    try:
+        from keris.modules.k8s import scan_k8s
+        fnds = scan_k8s(base, client, vuln_url=args.ssrf_url,
+                        vuln_param=args.ssrf_param, authorized=True)
+    finally:
+        client.close()
+    all_findings = [f.to_dict() for f in fnds]
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "k8s", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_crack(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("HASH CRACK")
+    if not getattr(args, "authorized", False):
+        error("crack memerlukan --authorized.")
+        return EXIT_ERROR
+    hashes = list(args.hash)
+    if args.hashes_file:
+        with open(args.hashes_file, "r", encoding="utf-8") as f:
+            hashes.extend(l.strip() for l in f if l.strip())
+    wordlist = None
+    if args.wordlist:
+        with open(args.wordlist, "r", encoding="utf-8") as f:
+            wordlist = [l.strip() for l in f if l.strip()]
+    from keris.modules.hashcrack import crack_hashes
+    fnds = crack_hashes(hashes, wordlist, brute_length=args.brute_length,
+                        authorized=True)
+    all_findings = [f.to_dict() for f in fnds]
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "crack", "findings": all_findings},
+                      f, indent=2, default=str)
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
 def _cmd_export(args, cfg, overrides) -> int:
     from keris.modules.export import export_requests
 
@@ -2583,6 +2926,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_pivot(args, cfg, overrides)
         if args.command == "rebind":
             return _cmd_rebind(args, cfg, overrides)
+        if args.command == "gitdump":
+            return _cmd_gitdump(args, cfg, overrides)
+        if args.command == "authbypass":
+            return _cmd_authbypass(args, cfg, overrides)
+        if args.command == "spray":
+            return _cmd_spray(args, cfg, overrides)
+        if args.command == "dbdump":
+            return _cmd_dbdump(args, cfg, overrides)
+        if args.command == "cloud":
+            return _cmd_cloud(args, cfg, overrides)
+        if args.command == "xsshook":
+            return _cmd_xsshook(args, cfg, overrides)
+        if args.command == "k8s":
+            return _cmd_k8s(args, cfg, overrides)
+        if args.command == "crack":
+            return _cmd_crack(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

