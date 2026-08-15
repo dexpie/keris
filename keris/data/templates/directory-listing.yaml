@@ -1,0 +1,28 @@
+id: directory-listing
+info:
+  name: Directory listing aktif
+  severity: MEDIUM
+  description: "Server menampilkan daftar isi direktori, membocorkan struktur dan file yang tidak seharusnya publik."
+  tags: [misconfig, exposure, information]
+  cwe: CWE-548
+  reference: https://owasp.org/www-project-web-security-testing-guide/
+  confidence: 0.8
+requests:
+  - method: GET
+    path: /uploads/
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["Index of"]
+        part: body
+      - type: word
+        words: ["Not Found", "Page not found", "404 - Not Found"]
+        part: body
+        condition: or
+        negative: true
+    extractors:
+      - type: regex
+        name: first_entry
+        regex: ["href=\"([^\"]+)\""]

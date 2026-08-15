@@ -1,0 +1,23 @@
+id: sql-backup-exposed
+info:
+  name: Dump database terekspos
+  severity: CRITICAL
+  description: "File dump SQL publik. Isi database (user, password hash, PII) terekspos."
+  tags: [misconfig, database, exposure]
+  cwe: CWE-538
+  reference: https://owasp.org/www-project-top-ten/
+  confidence: 0.9
+requests:
+  - method: GET
+    path: /db.sql
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        regex: ["(?im)^\\s*(INSERT INTO|CREATE TABLE|DROP TABLE|-- MySQL dump|-- PostgreSQL database dump)"]
+        part: body
+    extractors:
+      - type: regex
+        name: create_table
+        regex: ["(?i)CREATE TABLE[^\\n]*?`?([a-z0-9_]+)`?"]

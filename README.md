@@ -64,6 +64,9 @@ keris scan https://example.com -o report.md \
 # SARIF 2.1.0 (GitHub Code Scanning) + filter temuan ber-confidence rendah
 keris scan https://example.com -o report.md \
     --sarif-output scan.sarif --min-confidence 0.4
+
+# Template / rule engine (YAML pack bawaan: .env, .git, backup, actuator, dll)
+keris scan https://example.com -o report.md --templates
 ```
 
 Setiap temuan kini membawa **Standard Finding Schema v1.0.0** (`finding_schema`
@@ -71,6 +74,13 @@ di JSON, `id` deterministik, `cwe`, `source`) plus **confidence score** (0..1)
 dari Confidence engine: skor tinggi untuk bukti langsung (browser, exploit,
 git dump), rendah untuk sinyal heuristik — lengkap dengan daftar temuan yang
 butuh verifikasi manual di laporan.
+
+Template engine (v0.13.0) menambah deteksi deklaratif berakurasi tinggi:
+template YAML (mirip Nuclei, ringan) dengan matchers `status`/`word`/`regex`
+dan kondisi AND/OR. Temuan hanya lahir bila **semua** matcher terpenuhi, jadi
+false positive rendah. Pack bawaan di `keris/data/templates` (`.env` terekspos,
+`.git/config`, backup/dump database, phpinfo, Spring Actuator, directory
+listing, Swagger) — tambahkan `--templates-dir` untuk pack kustom.
 
 Try it in 30 seconds against a demo server that is deliberately full of holes:
 
@@ -147,6 +157,7 @@ never expose it publicly.
 | `k8s` | Kubernetes API enumeration & access test: direct or pivoted through an SSRF (authorized only) |
 | `crack` | Offline hash cracking: MD5/SHA1/SHA256/NTLM/MD5-Crypt via wordlist or short brute (authorized only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
+| `scan --templates` | Template/rule engine: YAML detections (`.env`, `.git`, backups, phpinfo, Actuator, directory listing, Swagger) with AND/OR matchers |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
 directory listing, auth bypass, CORS, open redirect, cookie flags, TLS,

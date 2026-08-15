@@ -78,7 +78,13 @@ def score_finding(f: Dict, source: str = "") -> Dict:
     """Hitung confidence untuk satu temuan dict. Mengembalikan salinan."""
     out = dict(f)
     src = (source or str(f.get("source", "")) or "").strip().lower()
-    base = SOURCE_BASE.get(src, DEFAULT_SOURCE_BASE)
+
+    # template engine sudah menghitung akurasi berbasis matcher; hormati itu
+    is_template = src.startswith("template-")
+    if is_template and f.get("confidence"):
+        base = float(f["confidence"])
+    else:
+        base = SOURCE_BASE.get(src, DEFAULT_SOURCE_BASE)
 
     text = " ".join([str(f.get("title", "")), str(f.get("detail", ""))]).lower()
     for w in WEAKEN:
@@ -90,7 +96,7 @@ def score_finding(f: Dict, source: str = "") -> Dict:
             base += 0.1
             break
 
-    base += _evidence_strength(f)
+    base += _evidence_strength(f) if not is_template else 0.0
 
     # severity tidak mengubah confidence secara langsung, tapi INFO/LOW
     # tanpa bukti di-cap rendah

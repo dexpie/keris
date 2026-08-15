@@ -1,0 +1,28 @@
+id: dotenv-exposed
+info:
+  name: File .env terekspos
+  severity: HIGH
+  description: "Environment file publik. Bisa berisi API key, kredensial DB, secret."
+  tags: [misconfig, secrets, exposure]
+  cwe: CWE-522
+  reference: https://owasp.org/www-project-top-ten/
+  confidence: 0.9
+requests:
+  - method: GET
+    path: /.env
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        regex: ["(?m)^[A-Z][A-Z0-9_]{2,}\\s*="]
+        part: body
+      - type: word
+        words: ["<!DOCTYPE", "<html"]
+        part: body
+        condition: or
+        negative: true
+    extractors:
+      - type: regex
+        name: first_key
+        regex: ["(?m)^([A-Z][A-Z0-9_]{2,})\\s*="]

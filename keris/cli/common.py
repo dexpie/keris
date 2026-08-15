@@ -106,6 +106,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Severity minimum untuk auto-ticketing (default: HIGH)")
     ps.add_argument("--hunt", action="store_true",
                     help="Jalankan credential hunting (.git, .env/backup, secret cloud) dalam scan")
+    ps.add_argument("--templates", action="store_true",
+                    help="Jalankan template/rule engine (YAML, default pack di keris/data/templates)")
+    ps.add_argument("--templates-dir", default="",
+                    help="Direktori template YAML kustom (default: pack bawaan)")
     ps.add_argument("--pwn", action="store_true",
                     help="AKTIFKAN SEMUA MODUL SERANGAN: hunt + chain + triage + browser + exploit + brute + CVE sekaligus (wajib --authorized)")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
@@ -1046,6 +1050,21 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             findings.extend(f.to_dict() for f in plugin_findings)
         else:
             debug("Tidak ada plugin ditemukan")
+
+    # template / rule engine (YAML): deteksi deklaratif berakurasi tinggi
+    if getattr(args, "templates", False):
+        info("=== TEMPLATES ===")
+        from keris.templates import load_templates, run_templates
+
+        tpl_dir = getattr(args, "templates_dir", "") or cfg.templates_dir or ""
+        tpls = load_templates(tpl_dir)
+        if tpls:
+            tpl_findings = run_templates(tpls, client, base)
+            findings.extend(tpl_findings)
+            if tpl_findings:
+                ok(f"Template engine: {len(tpl_findings)} temuan")
+        else:
+            info("Tidak ada template dimuat")
 
     # correlation engine: chain temuan rendah menjadi chain kritis
     if getattr(args, "chain", False) and findings:

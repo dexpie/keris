@@ -1,0 +1,29 @@
+id: backup-files-exposed
+info:
+  name: File backup/arsip terekspos
+  severity: HIGH
+  description: "Backup file (zip/sql/conf) publik. Kemungkinan berisi source code atau database."
+  tags: [misconfig, backup, exposure]
+  cwe: CWE-538
+  reference: https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/01-Information_Gathering/01-Browser_Documentation_and_Response
+  confidence: 0.85
+requests:
+  - method: GET
+    path: /backup.zip
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["PK"]
+        part: body
+      - type: word
+        words: ["text/html", "application/json"]
+        part: header
+        condition: or
+        negative: true
+    extractors:
+      - type: regex
+        name: content_type
+        part: header
+        regex: ["Content-Type:\\s*([^\\r\\n]+)"]

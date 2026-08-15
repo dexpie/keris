@@ -1,0 +1,24 @@
+id: spring-actuator-exposed
+info:
+  name: Spring Boot Actuator terekspos
+  severity: HIGH
+  description: "Endpoint Actuator publik dapat membocorkan health, env, beans, dan trace (data sensitif)."
+  tags: [misconfig, spring, exposure]
+  cwe: CWE-200
+  reference: https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html
+  confidence: 0.9
+requests:
+  - method: GET
+    path: /actuator/health
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        regex: ['"status"\s*:\s*"[A-Z]+"', '"status"\s*:\s*"\s*(UP|DOWN)']
+        part: body
+        condition: or
+    extractors:
+      - type: regex
+        name: status_value
+        regex: ['"status"\s*:\s*"([A-Z]+)"']

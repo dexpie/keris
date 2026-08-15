@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "password": None,
     "headers": {},
     "plugins_dir": "plugins",
+    "templates_dir": "",
     "login_paths": ["/login", "/signin", "/auth", "/account/login"],
     "findings": {},
 }
@@ -48,6 +49,7 @@ class KerisConfig:
     password: Optional[str] = None
     headers: Dict[str, str] = field(default_factory=dict)
     plugins_dir: str = "plugins"
+    templates_dir: str = ""
     login_paths: List[str] = field(default_factory=list)
     findings: Dict[str, Any] = field(default_factory=dict)
 
@@ -74,6 +76,7 @@ class KerisConfig:
         cfg = cls(**{k: v for k, v in merged.items() if k in cls.__dataclass_fields__})
         cfg.findings = data.get("findings", {})
         cfg.plugins_dir = data.get("plugins_dir", cfg.plugins_dir)
+        cfg.templates_dir = data.get("templates_dir", cfg.templates_dir)
         cfg.login_paths = data.get("login_paths", cfg.login_paths)
         return cfg
 

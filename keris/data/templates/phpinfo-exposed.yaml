@@ -1,0 +1,26 @@
+id: phpinfo-exposed
+info:
+  name: phpinfo() terekspos
+  severity: MEDIUM
+  description: "phpinfo menampilkan konfigurasi PHP lengkap termasuk environment, extension, dan path internal."
+  tags: [misconfig, php, exposure]
+  cwe: CWE-200
+  reference: https://owasp.org/www-project-web-security-testing-guide/
+  confidence: 0.9
+requests:
+  - method: GET
+    path: /phpinfo.php
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["phpinfo()"]
+        part: body
+      - type: word
+        words: ["PHP Version"]
+        part: body
+    extractors:
+      - type: regex
+        name: php_version
+        regex: ["PHP Version\\s*</td><td[^>]*>([0-9.]+)"]

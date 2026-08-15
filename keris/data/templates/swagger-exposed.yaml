@@ -1,0 +1,23 @@
+id: swagger-exposed
+info:
+  name: Dokumentasi API publik
+  severity: LOW
+  description: "Dokumentasi API (Swagger/OpenAPI) publik. Bisa dipakai untuk memahami dan menyerang endpoint internal."
+  tags: [misconfig, api, exposure]
+  cwe: CWE-200
+  reference: https://swagger.io/
+  confidence: 0.85
+requests:
+  - method: GET
+    path: /swagger-ui/index.html
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["Swagger UI"]
+        part: body
+    extractors:
+      - type: regex
+        name: swagger_version
+        regex: ["swagger-ui[^\"']{0,40}v?([0-9.]+)"]

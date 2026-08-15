@@ -1,0 +1,24 @@
+id: git-config-exposed
+info:
+  name: File .git/config terekspos
+  severity: HIGH
+  description: "Repositori git dapat diunduh publik. Source code dan riwayat commit bisa direkonstruksi."
+  tags: [misconfig, git, exposure, sourcecode]
+  cwe: CWE-538
+  reference: https://github.com/exploit-mitigations/git-dump
+  confidence: 0.95
+requests:
+  - method: GET
+    path: /.git/config
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["[core]", "repositoryformatversion", "[remote"]
+        part: body
+        condition: or
+    extractors:
+      - type: regex
+        name: remote_url
+        regex: ["url\\s*=\\s*(\\S+)"]
