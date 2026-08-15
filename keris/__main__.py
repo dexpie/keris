@@ -106,6 +106,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Auto-exploit injection: SQLi boolean/time, CMDI, SSTI, XSS (butuh --authorized)")
     ps.add_argument("--exploit-types", default="sqli,cmdi,ssti,xss",
                     help="Jenis exploit (default: sqli,cmdi,ssti,xss)")
+    ps.add_argument("--exploit-kit", action="store_true",
+                    help="Jalankan exploit kit (SQLi dump, LFI/RFI, upload bypass, XXE, RCE) (butuh --authorized)")
     ps.add_argument("--brute-extended", action="store_true",
                     help="Brute-force login dengan wordlist extended (butuh --authorized)")
     ps.add_argument("--username-enum", action="store_true",
@@ -426,6 +428,63 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pcc.add_argument("--auth-type", choices=["form", "basic"], default="form",
                      help="Metode login (default: form, fallback basic)")
     pcc.add_argument("--json-output", help="File output JSON")
+
+    # exploit (exploit kit: SQLi dump, LFI/RFI, upload bypass, XXE, RCE)
+    pexpl = sub.add_parser("exploit", parents=[common],
+                           help="Exploit kit: SQLi dump, LFI/RFI, upload bypass, XXE, RCE (wajib --authorized)")
+    pexpl.add_argument("--types", default="sqli,lfi,upload,xxe,rce",
+                       help="Jenis exploit (koma): sqli,lfi,rfi,upload,xxe,rce,pivot,rebind")
+    pexpl.add_argument("--callback", default=None,
+                       help="URL callback (interactsh/Burp) untuk RFI/XXE blind")
+    pexpl.add_argument("--max-param", type=int, default=3, dest="max_param",
+                       help="Maksimum parameter per endpoint")
+    pexpl.add_argument("--endpoint", action="append", default=[],
+                       help="Endpoint target manual dengan query (mis. /search?id=1); dapat diulang")
+    pexpl.add_argument("--authorized", action="store_true",
+                       help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    pexpl.add_argument("--json-output", help="File output JSON")
+    pexpl.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                       help="Severity minimum yang menyebabkan exit code 1")
+
+    # shell (generate reverse shell payload + konfirmasi RCE)
+    psh = sub.add_parser("shell", parents=[common],
+                         help="Generator payload reverse shell + konfirmasi RCE read-only (wajib --authorized)")
+    psh.add_argument("--lhost", help="IP mesin penyerang untuk reverse shell")
+    psh.add_argument("--lport", type=int, default=4444, help="Port mesin penyerang")
+    psh.add_argument("--endpoint", action="append", default=[],
+                     help="Endpoint dengan param untuk konfirmasi RCE (dapat diulang)")
+    psh.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    psh.add_argument("--json-output", help="File output JSON")
+
+    # pivot (SOCKS5 tunnel via SSRF)
+    ppv = sub.add_parser("pivot", parents=[common],
+                         help="SOCKS5 proxy pivot via endpoint SSRF terkonfirmasi (wajib --authorized --yes)")
+    ppv.add_argument("--ssrf-url", required=True,
+                     help="URL parameter SSRF yang rentan (mis. http://host/fetch?url=1)")
+    ppv.add_argument("--ssrf-param", required=True,
+                     help="Nama parameter SSRF")
+    ppv.add_argument("--bind", default="127.0.0.1", help="Host untuk bind SOCKS5")
+    ppv.add_argument("--port", type=int, default=1080, help="Port SOCKS5 lokal")
+    ppv.add_argument("--yes", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk menjalankan pivot")
+    ppv.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+
+    # rebind (DNS rebinding server)
+    prb = sub.add_parser("rebind", parents=[common],
+                         help="Server DNS rebinding untuk bypass SSRF (wajib --authorized --yes)")
+    prb.add_argument("--domain", required=True, help="Nama domain rebinding (mis. rebind.example.com)")
+    prb.add_argument("--target-ip", required=True,
+                     help="IP target internal setelah flip (mis. 169.254.169.254)")
+    prb.add_argument("--legit-ip", default="127.0.0.1",
+                     help="IP 'sah' untuk jawaban pertama (lolos validasi)")
+    prb.add_argument("--bind", default="127.0.0.1", help="Host untuk bind DNS (port 53 butuh root)")
+    prb.add_argument("--port", type=int, default=53, help="Port DNS")
+    prb.add_argument("--yes", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk menjalankan server DNS")
+    prb.add_argument("--authorized", action="store_true",
+                     help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
 
     return p.parse_args(argv)
 
@@ -748,6 +807,20 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         for f in run_exploit(base, client, endpoints[:25], types=types, authorized=authorized):
             findings.append(f.to_dict())
             severity(f.severity, f"{f.title}: {f.endpoint}")
+    # exploit kit: SQLi dump, LFI/RFI, upload bypass, XXE, RCE
+    if getattr(args, "exploit_kit", False):
+        if not authorized:
+            warn("Lewati exploit kit: butuh --authorized")
+        else:
+            from keris.modules.exploitkit import run_exploit_kit
+
+            kit_findings = run_exploit_kit(
+                base, client, endpoints[:25], authorized=authorized,
+                callback_url=getattr(args, "ssrf_callback", None) or "",
+            )
+            findings.extend(f.to_dict() for f in kit_findings)
+            for f in kit_findings:
+                severity(f.severity, f"{f.title}: {f.endpoint}")
     # brute-force extended + enumerasi username
     if getattr(args, "brute_extended", False):
         if not authorized:
@@ -2218,6 +2291,136 @@ def _cmd_hunt(args, cfg, overrides) -> int:
     return _exit_code(all_findings, getattr(args, "exit_on", "high"))
 
 
+def _cmd_exploit(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("EXPLOIT KIT")
+    targets = _resolve_targets(args)
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            from keris.modules import discovery as _disc
+
+            disc = _disc.discover_endpoints(base, client,
+                                            max_assets=overrides.get("max_assets", cfg.max_assets))
+            endpoints = disc.get("api_endpoints", [])[:30]
+            endpoints.extend(getattr(args, "endpoint", []))
+            endpoints = [e if e.startswith("http") else base.rstrip("/") + e
+                         for e in endpoints]
+            from keris.modules.exploitkit import run_exploit_kit
+
+            fnds = run_exploit_kit(
+                base, client, endpoints,
+                types=[t.strip() for t in args.types.split(",") if t.strip()],
+                callback_url=getattr(args, "callback", None),
+                authorized=bool(getattr(args, "authorized", False)),
+                yes=bool(getattr(args, "yes", False)),
+            )
+            all_findings.extend(f.to_dict() for f in fnds)
+        finally:
+            client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "exploit", "findings": all_findings},
+                      f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
+def _cmd_shell(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("RCE SHELL HELPER")
+    if not getattr(args, "authorized", False):
+        error("--shell memerlukan --authorized.")
+        return EXIT_ERROR
+    from keris.modules.shell import confirm_rce
+
+    results = []
+    if getattr(args, "lhost", None):
+        from keris.modules.exploitkit import print_shell_payloads
+
+        results.append({"payloads": print_shell_payloads(args.lhost, args.lport)})
+    if args.endpoint:
+        targets = _resolve_targets(args)
+        for target in targets:
+            base = normalize_url(target)
+            client = _make_client(args, cfg, overrides, base)
+            try:
+                fnds = confirm_rce(base, client, args.endpoint, authorized=True)
+                results.append({"endpoint": base,
+                                "findings": [f.to_dict() for f in fnds]})
+            finally:
+                client.close()
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": "keris", "version": __version__,
+                       "command": "shell", "results": results},
+                      f, indent=2, default=str)
+    return EXIT_OK
+
+
+def _cmd_pivot(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("SOCKS5 PIVOT")
+    if not getattr(args, "authorized", False) or not getattr(args, "yes", False):
+        error("Pivot memerlukan --authorized DAN --yes.")
+        return EXIT_ERROR
+    base = normalize_url(args.target) if getattr(args, "target", None) else args.ssrf_url
+    client = _make_client(args, cfg, overrides, base)
+    from keris.modules.pivot import setup_pivot
+
+    srv = setup_pivot(args.ssrf_url, args.ssrf_param, client,
+                      bind=args.bind, port=args.port,
+                      authorized=True, yes=True)
+    if srv is None:
+        client.close()
+        return EXIT_ERROR
+    try:
+        import time as _t
+        while True:
+            _t.sleep(3600)
+    except KeyboardInterrupt:
+        ok("Pivot dihentikan")
+    finally:
+        srv.stop()
+        client.close()
+    return EXIT_OK
+
+
+def _cmd_rebind(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("DNS REBINDING")
+    if not getattr(args, "authorized", False) or not getattr(args, "yes", False):
+        error("Rebind memerlukan --authorized DAN --yes.")
+        return EXIT_ERROR
+    base = normalize_url(args.target) if getattr(args, "target", None) else f"http://{args.domain}/"
+    client = _make_client(args, cfg, overrides, base)
+    from keris.modules.dnsrebind import start_rebinder
+
+    dns = start_rebinder(args.domain, args.target_ip, legit_ip=args.legit_ip,
+                         bind=args.bind, port=args.port,
+                         authorized=True, yes=True)
+    if dns is None:
+        client.close()
+        return EXIT_ERROR
+    try:
+        import time as _t
+        while True:
+            _t.sleep(3600)
+    except KeyboardInterrupt:
+        ok("DNS rebinding dihentikan")
+    finally:
+        dns.stop()
+        client.close()
+    return EXIT_OK
+
+
 def _cmd_export(args, cfg, overrides) -> int:
     from keris.modules.export import export_requests
 
@@ -2280,7 +2483,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                       "brute_extended", "exploit_cve", "cache_poisoning",
                       "host_header", "username_enum", "ssrf", "waf",
                       "ssrf_exploit", "jwt_attack", "race", "js_deps",
-                      "favicon", "server_cve", "wayback"):
+                      "favicon", "server_cve", "wayback", "exploit_kit"):
             if not hasattr(args, _flag):
                 setattr(args, _flag, False)
             setattr(args, _flag, True)
@@ -2372,6 +2575,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_hunt(args, cfg, overrides)
         if args.command == "credcheck":
             return _cmd_credcheck(args, cfg, overrides)
+        if args.command == "exploit":
+            return _cmd_exploit(args, cfg, overrides)
+        if args.command == "shell":
+            return _cmd_shell(args, cfg, overrides)
+        if args.command == "pivot":
+            return _cmd_pivot(args, cfg, overrides)
+        if args.command == "rebind":
+            return _cmd_rebind(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 
