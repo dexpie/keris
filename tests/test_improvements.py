@@ -352,3 +352,117 @@ class TestAuthChain:
             assert any(f.severity == "HIGH" for f in findings)
         finally:
             client.close()
+
+
+class TestServerCVE:
+    def test_extract_banner_versions(self):
+        from keris.modules.servercve import _extract_banner_versions
+
+        found = _extract_banner_versions({"Server": "nginx/1.20.1", "X-Powered-By": "PHP/7.4.33"})
+        pairs = {(p, v) for p, v in found}
+        assert ("nginx", "1.20.1") in pairs
+        assert ("php", "7.4.33") in pairs
+
+    def test_vuln_for_apache(self):
+        from keris.modules.servercve import _vuln_for
+
+        sev, _ = _vuln_for("apache", "2.4.49")
+        assert sev == "CRITICAL"
+
+    def test_vuln_for_clean_version(self):
+        from keris.modules.servercve import _vuln_for
+
+        assert _vuln_for("nginx", "1.27.0") is None
+
+    def test_scan_server_cve_findings(self):
+        from keris.modules.servercve import scan_server_cve
+
+        fs = scan_server_cve("http://x", {"X-Powered-By": "PHP/7.4.33"}, html="")
+        assert any("php" in f.title for f in fs)
+
+
+class TestWayback:
+    def test_interesting(self):
+        from keris.modules.wayback import _interesting
+
+        assert _interesting("/api/coupon/backup.zip")
+        assert not _interesting("/")
+
+    def test_wayback_findings_empty(self):
+        from keris.modules.wayback import wayback_findings
+
+        assert wayback_findings("http://x", {"urls": [], "interesting": []}) == []
+
+    def test_wayback_findings_nonempty(self):
+        from keris.modules.wayback import wayback_findings
+
+        fs = wayback_findings("http://x", {"urls": ["/a"], "interesting": ["/admin", "/.env"]})
+        assert len(fs) == 1
+        assert fs[0].severity == "MEDIUM"
+
+
+class TestRemediation:
+    def test_build_plan(self):
+        from keris.modules.remediation import build_remediation_plan
+
+        plan = build_remediation_plan([{"severity": "HIGH", "title": "SQLi", "endpoint": "/search"}])
+        assert plan["grade"] in ("C", "D")
+        assert plan["items"][0]["steps"]
+
+    def test_remediation_markdown(self):
+        from keris.modules.remediation import build_remediation_plan, remediation_markdown
+
+        plan = build_remediation_plan([{"severity": "CRITICAL", "title": "XSS", "endpoint": "/x"}])
+        md = remediation_markdown(plan, "http://x")
+        assert "Rencana Remediasi" in md
+        assert "Langkah perbaikan" in md
+
+    def test_report_includes_remediation(self):
+        from keris.report import generate_report
+
+        md = generate_report("http://x", {"headers": {}, "security_headers": [], "stack": [], "ips": []},
+                             {"api_endpoints": [], "secrets": []},
+                             [{"severity": "HIGH", "title": "SQLi", "endpoint": "/s", "detail": "d"}], {})
+        assert "Rencana Remediasi" in md
+
+
+class TestSubenum:
+    def test_detect_wildcard_no_domain(self):
+        from keris.modules.subenum import detect_wildcard
+
+        wc, ips = detect_wildcard("nonexistent-domain-xyz.test", timeout=2)
+        assert wc is False
+        assert ips == []
+
+
+class TestTrendHistory:
+    def test_trend_html_empty(self):
+        from keris.report_html import _trend_html
+
+        assert _trend_html([]) == ""
+
+    def test_trend_html_builds(self):
+        from keris.report_html import _trend_html
+
+        html = _trend_html([{"date": "2026-08-01", "grade": "C", "score": 50},
+                            {"date": "2026-08-15", "grade": "B", "score": 75}])
+        assert "Progress Trend" in html
+        assert "tr-bar" in html
+
+    def test_history_roundtrip(self):
+        import keris.__main__ as m
+
+        hist = [{"date": "x", "grade": "A", "score": 100}]
+        m._save_history("http://127.0.0.1:9999/", hist)
+        loaded = m._load_history("http://127.0.0.1:9999/")
+        assert loaded == hist
+        import os
+        os.remove(m._history_path("http://127.0.0.1:9999/"))
+
+
+class TestNotifierRiskNote:
+    def test_risk_note(self):
+        from keris.modules.notify import _risk_note
+
+        note = _risk_note([{"severity": "HIGH"}, {"severity": "LOW"}])
+        assert "Risk" in note

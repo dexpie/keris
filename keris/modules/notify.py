@@ -17,8 +17,18 @@ def _post_json(url: str, payload: Dict, timeout: float = 10.0) -> bool:
         return False
 
 
+def _risk_note(findings: List[dict]) -> str:
+    try:
+        from keris.modules.riskscore import risk_score
+
+        rs = risk_score(findings)
+        return f" | Risk: {rs['grade']} ({rs['score']}/100)"
+    except Exception:
+        return ""
+
+
 def send_slack(webhook: str, base: str, findings: List[dict]) -> bool:
-    text = f"*Keris scan: {base}* ({len(findings)} temuan)\n"
+    text = f"*Keris scan: {base}* ({len(findings)} temuan{_risk_note(findings)})\n"
     for f in findings[:15]:
         sev = f.get("severity", "INFO")
         text += f"\n• *[{sev}]* {f.get('title', '')} — {f.get('endpoint', '')}"
@@ -38,7 +48,7 @@ def send_discord(webhook: str, base: str, findings: List[dict]) -> bool:
             "inline": False,
         })
     embed = {
-        "title": f"Keris scan: {base}",
+        "title": f"Keris scan: {base}{_risk_note(findings)}",
         "color": color,
         "fields": fields or [{"name": "OK", "value": "Tidak ada temuan."}],
     }
@@ -46,7 +56,7 @@ def send_discord(webhook: str, base: str, findings: List[dict]) -> bool:
 
 
 def send_telegram(bot_token: str, chat_id: str, base: str, findings: List[dict]) -> bool:
-    lines = [f"Keris scan: {base} ({len(findings)} temuan)"]
+    lines = [f"Keris scan: {base} ({len(findings)} temuan{_risk_note(findings)})"]
     for f in findings[:15]:
         lines.append(f"[{f.get('severity', 'INFO')}] {f.get('title', '')} — {f.get('endpoint', '')}")
     text = "\n".join(lines)

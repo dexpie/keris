@@ -137,6 +137,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Cek dependency JS yang ditemukan di bundle terhadap CVE offline")
     ps.add_argument("--favicon", action="store_true",
                     help="Fingerprint teknologi via hash favicon (cara Shodan)")
+    ps.add_argument("--server-cve", action="store_true",
+                    help="Cek CVE untuk versi server/framework dari banner HTTP (nginx/Apache/PHP/WordPress/dll)")
+    ps.add_argument("--wayback", action="store_true",
+                    help="Mining URL historis dari Wayback Machine (pasif) untuk discovery aset tersembunyi")
     ps.add_argument("--race-endpoints", default=None,
                     help="Endpoint tambahan untuk uji race (koma, mis. /api/coupon,/api/topup)")
 
@@ -238,6 +242,16 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pdns.add_argument("--json-output", help="File output JSON")
     pdns.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     pdns.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # subdomain enum + wildcard detection
+    psub = sub.add_parser("subdomain", help="Enumerasi subdomain: crt.sh + brute + wildcard DNS detection")
+    psub.add_argument("domain", help="Domain untuk di-enumerasi")
+    psub.add_argument("--no-crt", action="store_true", help="Lewati crt.sh (hanya brute)")
+    psub.add_argument("--wordlist", help="File wordlist subdomain (default: data/subdomains.txt)")
+    psub.add_argument("--workers", type=int, default=20, help="Thread untuk brute (default 20)")
+    psub.add_argument("--json-output", help="File output JSON")
+    psub.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    psub.add_argument("--quiet", action="store_true", help="Minimal output")
 
     # buckets (cloud bucket checker)
     pbk = sub.add_parser("buckets", parents=[common], help="Cek bucket S3/GCS/Azure terbuka")
@@ -951,6 +965,34 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         except Exception as e:
             warn(f"Favicon fingerprint gagal: {e}")
 
+    # server/framework CVE (banner-based)
+    if getattr(args, "server_cve", False):
+        from keris.modules.servercve import scan_server_cve
+
+        try:
+            r0 = client.get(base, timeout=15)
+            html_src = r0.text or ""
+            headers0 = dict(r0.headers) if r0.status_code else {}
+            for f in scan_server_cve(base, headers0, html=html_src):
+                findings.append(f.to_dict())
+                severity(f.severity, f"{f.title}: {f.endpoint}")
+        except requests.RequestException as e:
+            warn(f"Server CVE check gagal: {e}")
+        except Exception as e:
+            warn(f"Server CVE check gagal: {e}")
+
+    # wayback mining (pasif)
+    if getattr(args, "wayback", False):
+        from keris.modules.wayback import mine_urls, wayback_findings
+
+        try:
+            wb = mine_urls(base)
+            for f in wayback_findings(base, wb):
+                findings.append(f.to_dict())
+                severity(f.severity, f"{f.title}: {f.endpoint}")
+        except Exception as e:
+            warn(f"Wayback mining gagal: {e}")
+
     # webhook notifikasi untuk temuan HIGH/CRITICAL
     webhook = getattr(args, "webhook", None)
     if webhook:
@@ -982,6 +1024,15 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         result["findings"] = findings
         exec_note = executive_summary(findings, base, raw_ai)
         ok(f"Triage selesai: {len(findings)} temuan ditinjau")
+
+    # riwayat risk score untuk trend chart di report HTML
+    history = _load_history(base)
+    _rs = __import__("keris.modules.riskscore", fromlist=["risk_score"]).risk_score(findings)
+    history.append({"date": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "grade": _rs["grade"], "score": _rs["score"], "total": len(findings)})
+    _save_history(base, history)
+    options = dict(options or {})
+    options["history"] = history[-30:]
 
     if args.output:
         write_report(recon, disc, findings, args.output, base, options)
@@ -1024,6 +1075,37 @@ def _suffixed(path: str, slug: str) -> str:
     if dot > path.rfind(os.sep):
         return path[:dot] + "-" + slug + path[dot:]
     return path + "-" + slug
+
+
+def _history_path(base: str) -> str:
+    """Path file riwayat risk score untuk target."""
+    import hashlib
+
+    key = hashlib.md5(base.encode("utf-8")).hexdigest()[:10]
+    return os.path.join(os.path.expanduser("~"), ".keris", f"history-{key}.json")
+
+
+def _load_history(base: str) -> List[dict]:
+    p = _history_path(base)
+    try:
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    return []
+
+
+def _save_history(base: str, history: List[dict]) -> None:
+    p = _history_path(base)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(history[-100:], f, indent=1)
+    except Exception:
+        pass
 
 
 def _exit_code(findings: List[dict], threshold: str) -> int:
@@ -1463,6 +1545,40 @@ def _cmd_dns(args, cfg, overrides) -> int:
     if args.json_output:
         with open(args.json_output, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_subdomain(args, cfg, overrides) -> int:
+    from keris.modules.subenum import (
+        enumerate_subdomains,
+        subenum_findings,
+        detect_wildcard,
+    )
+
+    domain = args.domain
+    wordlist = None
+    if getattr(args, "wordlist", None):
+        with open(args.wordlist, "r", encoding="utf-8") as f:
+            wordlist = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    else:
+        from keris.modules.discovery import load_wordlist
+
+        wordlist = load_wordlist("subdomains.txt")
+
+    result = enumerate_subdomains(
+        domain,
+        wordlist=wordlist,
+        use_crt=not getattr(args, "no_crt", False),
+        max_workers=getattr(args, "workers", 20),
+    )
+    for f in subenum_findings(domain, result):
+        severity(f.severity, f"{f.title}: {f.endpoint}")
+
+    ok(f"Total subdomain: {result['count']}")
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as fh:
+            json.dump(result, fh, indent=2, default=str)
         ok(f"JSON output: {args.json_output}")
     return EXIT_OK
 
@@ -2141,7 +2257,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         for _flag in ("hunt", "chain", "triage", "browser", "exploit",
                       "brute_extended", "exploit_cve", "cache_poisoning",
                       "host_header", "username_enum", "ssrf", "waf",
-                      "ssrf_exploit", "jwt_attack"):
+                      "ssrf_exploit", "jwt_attack", "race", "js_deps",
+                      "favicon", "server_cve", "wayback"):
             if not hasattr(args, _flag):
                 setattr(args, _flag, False)
             setattr(args, _flag, True)
@@ -2185,6 +2302,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_wayback(args, cfg, overrides)
         if args.command == "dns":
             return _cmd_dns(args, cfg, overrides)
+        if args.command == "subdomain":
+            return _cmd_subdomain(args, cfg, overrides)
         if args.command == "buckets":
             return _cmd_buckets(args, cfg, overrides)
         if args.command == "tls":

@@ -200,16 +200,13 @@ def generate_report(
                 lines.append("")
 
     # Rekomendasi
-    lines.append("## 7. Rekomendasi Prioritas")
-    lines.append("")
-    lines.append("1. Verifikasi dan perbaiki temuan berlevel HIGH/CRITICAL terlebih dahulu.")
-    lines.append("2. Pastikan rate limiting aktif pada seluruh endpoint autentikasi dan API publik.")
-    lines.append("3. Terapkan kontrol akses per-objek (IDOR) dan validasi input yang konsisten.")
-    lines.append("4. Tutup directory listing dan batasi akses file sensitif.")
-    lines.append("5. Perkuat security headers yang hilang pada bagian 2.")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
+    from keris.modules.remediation import build_remediation_plan, remediation_markdown
+
+    plan = build_remediation_plan(findings)
+    if plan["items"]:
+        lines.append(remediation_markdown(plan, target))
+        lines.append("---")
+        lines.append("")
     lines.append("*Laporan dihasilkan otomatis oleh Keris. Verifikasi manual disarankan untuk temuan yang berstatus 'terindikasi' atau 'potensial'.*")
     lines.append("")
 

@@ -108,6 +108,7 @@ never expose it publicly.
 | `discover` / `hidden` / `params` | API endpoint extraction, directory/subdomain brute, admin/`.env`/backup hunting, hidden parameters |
 | `fuzz` / `openapi` | Lightweight parameter fuzzing; import a Swagger spec and fuzz its endpoints |
 | `jwt` / `ports` / `tls` / `dns` / `buckets` / `waf` | JWT analysis, TCP port scan, TLS checks, email security (SPF/DMARC/DKIM), public S3/GCS buckets, WAF fingerprinting |
+| `wayback` / `subdomain` | Wayback CDX historical URL mining; subdomain enumeration (crt.sh + brute + wildcard DNS detection) |
 | `crawl` / `graphql` / `smuggling` / `takeover` | Attack-surface map, GraphQL testing, request smuggling, subdomain takeover |
 | `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (incl. password-reset poisoning), WebSocket auth & Origin checks |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
@@ -410,6 +411,60 @@ Grafana, …):
 
 ```bash
 keris scan https://example.com --favicon
+```
+
+### Server/framework CVE (`--server-cve`)
+
+Detects server & framework versions from HTTP banners (nginx, Apache, IIS,
+PHP, OpenSSL, WordPress, Joomla, Drupal, Laravel, Tomcat, …) and matches
+them against an offline CVE database:
+
+```bash
+keris scan https://example.com --server-cve
+```
+
+### Wayback URL mining (`--wayback` / `wayback`)
+
+Mines historical URLs from the Wayback Machine CDX API (passive, never
+touches the target) to rediscover deleted endpoints, admin pages, backup
+files and hidden parameters:
+
+```bash
+keris wayback example.com --json-output wayback.json
+keris scan https://example.com --wayback
+```
+
+### Subdomain enumeration (`subdomain`)
+
+Combines crt.sh (certificate transparency), wordlist brute-force and
+**wildcard DNS detection** so results aren't polluted by wildcard resolvers.
+Pairs with the existing `takeover` module:
+
+```bash
+keris subdomain example.com --json-output subs.json
+keris subdomain example.com --no-crt --wordlist my-subs.txt --workers 40
+```
+
+### Remediation plan
+
+Every markdown report ends with a prioritized **remediation plan** — per
+finding, concrete fix steps grouped by severity, so the report isn't just a
+list of problems but an action plan for the dev team.
+
+### Risk-score trend chart
+
+Keris keeps a per-target history of risk scores under `~/.keris/`. HTML
+reports show a **progress trend chart** so retests/watch cycles visualize
+remediation progress over time.
+
+### Messaging notifier (Slack/Telegram/Discord)
+
+Scan and `watch` send HIGH/CRITICAL findings to a webhook, now including the
+overall risk grade:
+
+```bash
+keris scan https://example.com --webhook https://hooks.slack.com/services/... --webhook-type slack
+keris watch example.com --webhook https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>
 ```
 
 ## Active attacks

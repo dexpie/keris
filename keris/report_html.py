@@ -67,6 +67,32 @@ def _attack_path_html(findings: List[Dict]) -> str:
     return f'<h2>Attack Paths</h2><div class="paths">{ "".join(blocks) }</div>'
 
 
+def _trend_html(history: List[Dict]) -> str:
+    """Grafik tren risk score dari riwayat scan (options['history'])."""
+    if not history:
+        return ""
+    rows = "".join(
+        f"<div class='tr-item'><span class='tr-date'>{_e(h.get('date', ''))}</span>"
+        f"<div class='tr-bar-wrap'><div class='tr-bar' style='width:{h.get('score', 0)}%' "
+        f"title='{h.get('score', 0)}/100'>{_e(h.get('grade', ''))}</div></div></div>"
+        for h in history
+    )
+    return f"""
+    <h2>Progress Trend (Risk Score)</h2>
+    <div class="trend">
+      <div class="tr-head"><span>Scan</span><span>Score (A-F)</span></div>
+      {rows}
+    </div>"""
+
+
+def _history_from_options(target: str, options: Dict) -> List[Dict]:
+    """Ambil riwayat risk score untuk target dari options['history']."""
+    hist = options.get("history") or []
+    if isinstance(hist, list) and hist:
+        return hist
+    return []
+
+
 def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: List[Dict], options: Dict = None) -> str:
     options = options or {}
     now = datetime.utcnow().strftime("%d %B %Y, %H:%M UTC")
@@ -128,6 +154,8 @@ def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: Li
     from keris.modules.riskscore import risk_score
 
     _rs = risk_score(findings)
+    _history = _history_from_options(target, options)
+    trend_html = _trend_html(_history)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -173,6 +201,12 @@ li {{ margin: 3px 0; }}
 .node-ep {{ font-family: monospace; font-size: 11px; color: #93c5fd; margin-top: 2px; }}
 .arrow {{ color: #fbbf24; font-size: 18px; font-weight: 700; }}
 .path-why {{ font-size: 12px; color: #94a3b8; margin-top: 6px; }}
+.trend {{ margin: 12px 0 20px; }}
+.tr-head, .tr-item {{ display: flex; align-items: center; gap: 10px; font-size: 12px; }}
+.tr-head {{ color: #94a3b8; margin-bottom: 6px; }}
+.tr-date {{ width: 160px; font-family: monospace; }}
+.tr-bar-wrap {{ flex: 1; background: #0f172a; border-radius: 4px; height: 18px; overflow: hidden; }}
+.tr-bar {{ background: linear-gradient(90deg, #d4a24e, #f0c46a); color: #0f172a; font-size: 11px; font-weight: 700; line-height: 18px; padding-left: 6px; height: 100%; border-radius: 4px; }}
 </style>
 </head>
 <body>
@@ -189,6 +223,8 @@ li {{ margin: 3px 0; }}
   </div>
 
   <p style="font-size:13px;color:#94a3b8;margin:-8px 0 16px">{_e(_rs['recommendation'])}</p>
+
+  {trend_html}
 
   <h2>Severity</h2>
   {sev_bars}
