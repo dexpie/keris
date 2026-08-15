@@ -59,6 +59,10 @@ def generate_report(
         s = f.get("severity", "INFO").upper()
         sev_counts[s] = sev_counts.get(s, 0) + 1
 
+    from keris.confidence import aggregate_confidence
+
+    conf_agg = aggregate_confidence(findings)
+
     lines.append("## Ringkasan Eksekutif")
     lines.append("")
     total = sum(sev_counts.values())
@@ -78,6 +82,24 @@ def generate_report(
     for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
         lines.append(f"| {sev} | {sev_counts.get(sev, 0)} |")
     lines.append("")
+
+    # Confidence ringkasan (confidence engine v1.0.0)
+    lines.append("### Confidence Ringkasan")
+    lines.append("")
+    lines.append(f"Rata-rata keyakinan: **{conf_agg['avg']:.2f}**")
+    lines.append("")
+    if conf_agg["by_label"]:
+        lines.append("| Label | Jumlah |")
+        lines.append("|---|---|")
+        for label in ("confirmed", "high", "medium", "low"):
+            lines.append(f"| {label} | {conf_agg['by_label'].get(label, 0)} |")
+        lines.append("")
+    if conf_agg["verify_first"]:
+        lines.append("_Perlu verifikasi manual (confidence rendah):_")
+        lines.append("")
+        for v in conf_agg["verify_first"]:
+            lines.append(f"- `{_esc(v['endpoint'])}` — {_esc(v['title'])} (conf {v['confidence']:.2f})")
+        lines.append("")
 
     # Pemetaan OWASP Top 10 & CVSS
     from keris.cvss import classify, owasp_summary
@@ -185,6 +207,13 @@ def generate_report(
             lines.append(f"#### {i}. [{f.get('severity', 'INFO')}] {_esc(f.get('title', ''))}")
             lines.append("")
             lines.append(f"**Lokasi:** `{_esc(f.get('endpoint', ''))}`")
+            lines.append("")
+            conf = f.get("confidence", 0.5)
+            conf_label = f.get("confidence_label", "")
+            lines.append(
+                f"**Confidence:** {conf:.2f} "
+                f"({_esc(conf_label)})"
+            )
             lines.append("")
             cvss = classify(f.get("title", ""), f.get("severity", ""))
             lines.append(

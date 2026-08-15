@@ -72,6 +72,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps = sub.add_parser("scan", parents=[common], help="Scan lengkap: recon + discovery + vuln scan + laporan")
     ps.add_argument("-o", "--output", default="keris-report.md", help="File laporan markdown")
     ps.add_argument("--json-output", help="File output JSON (untuk CI)")
+    ps.add_argument("--sarif-output", help="File output SARIF 2.1.0 (untuk GitHub Code Scanning)")
     ps.add_argument("--html", dest="html_output", help="File laporan HTML (self-contained)")
     ps.add_argument("--pdf", dest="pdf_output", help="File laporan PDF")
     ps.add_argument("--no-discover", action="store_true", help="Lewati discovery (endpoint/JS)")
@@ -112,6 +113,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Scan beberapa target secara paralel (butuh --targets, mempercepat batch besar)")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
+    ps.add_argument("--min-confidence", type=float, default=0.0,
+                    help="Hanya tampilkan temuan dengan confidence >= nilai ini (0..1, default 0 = semua)")
     # --- serangan aktif (khusus berizin, wajib --authorized) ---
     ps.add_argument("--authorized", action="store_true",
                     help="KONFIRMASI izin tertulis untuk serangan aktif (exploit/brute/CVE)")
@@ -1192,6 +1195,19 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             debug("Tidak ada temuan HIGH/CRITICAL; webhook dilewati")
 
     ok(f"Scan selesai: {len(findings)} temuan")
+
+    # confidence engine + standard finding schema (v1.0.0)
+    from keris.confidence import assign_confidence
+    from keris.finding import normalize_findings
+
+    findings = normalize_findings(assign_confidence(findings))
+    min_conf = getattr(args, "min_confidence", 0.0) or 0.0
+    if min_conf > 0.0:
+        before = len(findings)
+        findings = [f for f in findings if f.get("confidence", 0.5) >= min_conf]
+        if len(findings) < before:
+            info(f"Filter confidence >= {min_conf}: {before} -> {len(findings)} temuan")
+
     result = {"recon": recon, "discovery": disc, "findings": findings}
     if passive:
         result["passive"] = passive
@@ -1208,9 +1224,13 @@ def _ensure_parent(path: str) -> None:
 def _write_json_output(base, findings, recon, disc, path, exec_note=None) -> None:
     """Tulis hasil scan ke file JSON."""
     _ensure_parent(path)
+    from keris.confidence import aggregate_confidence
+    from keris.finding import SCHEMA_VERSION
+
     payload = {
         "tool": "keris",
         "version": __version__,
+        "finding_schema": SCHEMA_VERSION,
         "target": base,
         "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         "summary": {
@@ -1218,6 +1238,7 @@ def _write_json_output(base, findings, recon, disc, path, exec_note=None) -> Non
             **{s: sum(1 for f in findings if f.get("severity", "INFO").upper() == s)
                for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")},
         },
+        "confidence": aggregate_confidence(findings),
         "risk_score": __import__("keris.modules.riskscore", fromlist=["risk_score"]).risk_score(findings),
         "recon": recon,
         "discovery": {"api_endpoints": disc.get("api_endpoints", []),
@@ -1269,6 +1290,12 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         ok(f"PDF output: {args.pdf_output}")
     if getattr(args, "json_output", None):
         _write_json_output(base, findings, recon, disc, args.json_output, exec_note)
+    if getattr(args, "sarif_output", None):
+        from keris.report_sarif import write_sarif
+
+        _ensure_parent(args.sarif_output)
+        write_sarif(findings, base, args.sarif_output)
+        ok(f"SARIF output: {args.sarif_output}")
 
 
 def _suffixed(path: str, slug: str) -> str:

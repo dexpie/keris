@@ -60,7 +60,17 @@ keris scan https://example.com -o report.md
 # Same scan, JSON (for CI) + HTML
 keris scan https://example.com -o report.md \
     --json-output report.json --html report.html
+
+# SARIF 2.1.0 (GitHub Code Scanning) + filter temuan ber-confidence rendah
+keris scan https://example.com -o report.md \
+    --sarif-output scan.sarif --min-confidence 0.4
 ```
+
+Setiap temuan kini membawa **Standard Finding Schema v1.0.0** (`finding_schema`
+di JSON, `id` deterministik, `cwe`, `source`) plus **confidence score** (0..1)
+dari Confidence engine: skor tinggi untuk bukti langsung (browser, exploit,
+git dump), rendah untuk sinyal heuristik — lengkap dengan daftar temuan yang
+butuh verifikasi manual di laporan.
 
 Try it in 30 seconds against a demo server that is deliberately full of holes:
 

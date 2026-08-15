@@ -58,6 +58,13 @@ def _cmd_scan(args, cfg, overrides) -> int:
             if getattr(args, "json_output", None):
                 _write_json_output(base, result["findings"], result["recon"],
                                    result["discovery"], _suffixed(args.json_output, slug))
+            if getattr(args, "sarif_output", None):
+                from keris.report_sarif import write_sarif
+
+                _ensure_parent(_suffixed(args.sarif_output, slug))
+                write_sarif(result["findings"], base,
+                            _suffixed(args.sarif_output, slug))
+                ok(f"SARIF output: {_suffixed(args.sarif_output, slug)}")
         else:
             _write_outputs(base, result, args, options, cfg)
         return base, result, _exit_code(result["findings"], getattr(args, "exit_on", "high"))
