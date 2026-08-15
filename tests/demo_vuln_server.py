@@ -9,6 +9,7 @@ Celah yang disimulasikan:
 
 import json
 import sqlite3
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -17,9 +18,11 @@ class VulnerableHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def _send(self, code, body, content_type="application/json"):
+    def _send(self, code, body, content_type="application/json", headers=None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -34,6 +37,15 @@ class VulnerableHandler(BaseHTTPRequestHandler):
                     b"<a href='/api/fetch?url=http://example.com'>fetch</a>"
                     b"</body></html>")
             self._send(200, html, "text/html")
+            return
+
+        if path == "/favicon.ico":
+            # favicon statis (dummy PNG) agar fingerprint bisa dihitung
+            import base64
+            png = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            )
+            self._send(200, png, "image/x-icon")
             return
 
         if path == "/refl":
@@ -120,6 +132,48 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 body = json.dumps({"error": f"SQLite error: {e}"}).encode()
                 self._send(500, body)
+            return
+
+        # JWT: endpoint menerima token lemah (secret "secret") — vuln simulasi
+        if path in ("/api/me", "/api/user"):
+            auth = self.headers.get("Authorization", "")
+            tok = qs["token"][0] if "token" in qs else (auth.split(" ", 1)[1] if auth.startswith("Bearer ") else "")
+            if tok:
+                try:
+                    import base64
+                    import json as _j
+                    import hmac
+                    import hashlib
+                    hdr, pay, sig = tok.split(".")
+                    def _b64d(s):
+                        return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+                    payload = _j.loads(_b64d(pay))
+                    # verifikasi signature dengan secret "secret"
+                    signing = (hdr + "." + pay).encode()
+                    expect = base64.urlsafe_b64encode(hmac.new(b"secret", signing, hashlib.sha256).digest()).rstrip(b"=").decode()
+                    if hmac.compare_digest(sig, expect) and payload.get("admin"):
+                        self._send(200, json.dumps({"ok": True, "user": payload.get("user", "?"), "admin": True}).encode())
+                    else:
+                        self._send(403, json.dumps({"error": "forbidden"}).encode())
+                except Exception:
+                    self._send(400, json.dumps({"error": "bad token"}).encode())
+            else:
+                self._send(401, json.dumps({"error": "no token"}).encode())
+            return
+
+        # area terproteksi: memerlukan cookie session=admin-ok
+        if path in ("/dashboard", "/account", "/profile"):
+            if self.headers.get("Cookie") == "session=admin-ok":
+                body = f"<html><body><h1>{path}</h1><p>account detail: password='secret', nik='320101...'</p></body></html>".encode()
+                self._send(200, body, "text/html")
+            else:
+                self._send(302, b"", {"Location": "/login"})
+            return
+
+        # race: operasi sekali-pakai (claim kupon). Server sengaja lambat -> double-apply
+        if path in ("/api/claim", "/api/coupon", "/api/topup", "/api/vote"):
+            time.sleep(0.3)
+            self._send(200, json.dumps({"ok": True, "applied": 1, "remaining": "none"}).encode())
             return
 
         if path == "/search2":
@@ -278,9 +332,13 @@ class VulnerableHandler(BaseHTTPRequestHandler):
             pw = unquote_plus(vals.get("password", ""))
             if user == "admin" and pw == "password123":
                 html = b"<html><body><h1>Welcome, admin</h1><a href='/logout'>logout</a></body></html>"
-                self._send(200, html, "text/html")
+                self._send(200, html, "text/html", {"Set-Cookie": "session=admin-ok; Path=/; HttpOnly"})
             else:
                 self._send(401, json.dumps({"error": "invalid credentials"}).encode())
+            return
+        if parsed.path in ("/api/claim", "/api/coupon", "/api/topup", "/api/vote"):
+            time.sleep(0.3)
+            self._send(200, json.dumps({"ok": True, "applied": 1, "remaining": "none"}).encode())
             return
         self._send(404, json.dumps({"error": "not found"}).encode())
 

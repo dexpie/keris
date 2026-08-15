@@ -125,6 +125,10 @@ def generate_html_report(target: str, recon: Dict, discovery: Dict, findings: Li
         f"<tr><td>{_e(r['category'])}</td><td>{r['count']}</td></tr>" for r in _owasp
     ) or "<tr><td colspan=2>Tidak ada temuan</td></tr>"
 
+    from keris.modules.riskscore import risk_score
+
+    _rs = risk_score(findings)
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -145,6 +149,7 @@ code {{ background: #1e293b; padding: 2px 5px; border-radius: 4px; font-size: 12
 .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 20px; }}
 .stat {{ background: #1e293b; border-radius: 8px; padding: 14px; }}
 .stat b {{ display: block; font-size: 26px; }}
+.stat b.grad {{ background: linear-gradient(135deg, #d4a24e, #f0c46a); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 30px; }}
 .stat span {{ font-size: 12px; color: #94a3b8; }}
 .sev-row {{ display: flex; align-items: center; gap: 10px; font-size: 13px; margin: 4px 0; }}
 .sev-name {{ width: 80px; }}
@@ -176,11 +181,14 @@ li {{ margin: 3px 0; }}
   <div class="sub">Target: {_e(target)} &middot; Date: {now} &middot; Tool: Keris &middot; Mode: {_e(options.get('mode', 'auto'))}</div>
 
   <div class="summary-grid">
+    <div class="stat"><b class="grad">{_e(_rs['grade'])}</b><span>Risk Score ({_e(_rs['score'])})</span></div>
     <div class="stat"><b>{total}</b><span>Findings</span></div>
     <div class="stat"><b>{counts['HIGH'] + counts['CRITICAL']}</b><span>High+Critical</span></div>
     <div class="stat"><b>{len(discovery.get('api_endpoints', []))}</b><span>API Endpoints</span></div>
     <div class="stat"><b>{discovery.get('secret_count', 0)}</b><span>Secrets</span></div>
   </div>
+
+  <p style="font-size:13px;color:#94a3b8;margin:-8px 0 16px">{_e(_rs['recommendation'])}</p>
 
   <h2>Severity</h2>
   {sev_bars}

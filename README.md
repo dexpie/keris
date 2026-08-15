@@ -25,21 +25,22 @@ starts rate-limiting you.
   <img src="docs/screenshots/scan.png" alt="Keris scan running in the terminal" width="720">
 </p>
 
-## ⚠️ WARNING — BRUTAL & OVERPOWERED TOOL
+## ⚠️ Warning — active attack features
 
 Keris can run **active attacks**: auto-exploitation, brute-force with extended
 wordlists, credential validation against a live login, credential hunting
 (`.git` dumps, leaked keys), CVE probes, and a **multi-vector DoS hammer**
 (slowloris + slow POST + flood simultaneously).
 
-- **You are responsible for your own actions. Use with your own supervision —
-  every risk is carried by the user, not the tool.**
-- A prominent red warning banner is printed before every aggressive mode
-  (`--pwn`, `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
-  `credcheck`). It is a reminder, not a consent form.
+- **For authorized testing only.** Point this only at systems you own or are
+  explicitly hired and permitted to test.
 - **Written authorization from the target owner is mandatory.** Attacking a
   system without permission is illegal in almost every jurisdiction.
-- Never point this at anything you don't own or aren't explicitly hired to test.
+- A red warning banner is printed before every aggressive mode (`--pwn`,
+  `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
+  `credcheck`). It is a reminder that all risk stays with you.
+- Never use this for cybercrime. Legality and responsibility sit with the
+  operator, not the tool.
 
 [![PyPI](https://img.shields.io/pypi/v/keris-toolkit?color=d4a24e&label=keris-toolkit)](https://pypi.org/project/keris-toolkit)
 [![CI](https://github.com/dexpie/keris/actions/workflows/ci.yml/badge.svg)](https://github.com/dexpie/keris/actions/workflows/ci.yml)
@@ -125,9 +126,10 @@ never expose it publicly.
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
 directory listing, auth bypass, CORS, open redirect, cookie flags, TLS,
 security.txt, plus cache poisoning / host header / WebSocket / JS analysis /
-sensitive data / hidden endpoints / fuzz modules.
+sensitive data / hidden endpoints / fuzz modules. Each report also carries a
+**risk score A-F** computed from the finding mix.
 
-## The overpowered stuff
+## Advanced modules
 
 ### Attack chains (`--chain`)
 
@@ -270,9 +272,9 @@ What it checks:
 Credentials are redacted in reports (`AKIA…MPLE`); full values never hit the
 console or JSON output.
 
-### Brutal DoS (`--hammer`)
+### DoS hammer (`--hammer`)
 
-`dos` gains a brutal mode that runs slowloris + slow POST + flood
+`dos` gains a heavy mode that runs slowloris + slow POST + flood
 **simultaneously** (3× threads) with your chosen caps:
 
 ```bash
@@ -285,7 +287,7 @@ checks whether the service still answers and reports a HIGH finding if not.
 
 ### One-flag everything (`--pwn`)
 
-The "overpowered" switch. Turns on **every** module in one go — recon,
+The full-attack switch. Turns on **every** module in one go — recon,
 discovery, hunt, browser, correlation chains, triage, auto-exploit, brute-force
 extended, and CVE probes:
 
@@ -346,6 +348,69 @@ keris scan https://example.com --waf
 
 Useful before a pentest: know what filter you're up against, and whether the
 target is already blocking payloads.
+
+### JWT attack (`--jwt-attack`)
+
+Takes any JWT found during the scan and attacks it (authorized only):
+
+- **weak HMAC secret brute** — ~100 common secrets + suffix variants
+- **alg=none** — forge a token with no signature
+- **RS → HS confusion** — sign with the public key when detected
+- **expired token replay** — replay an already-expired token
+
+Every successful exploit is **proven** by sending the forged token to the
+target and reporting the accepting endpoint.
+
+```bash
+keris scan https://example.com --authorized --jwt-attack
+```
+
+### Auto-auth chain (`--auth-chain`)
+
+After logging in with valid credentials, scans the **post-login attack
+surface** — `/dashboard`, `/admin`, `/account`, API endpoints — for broken
+access control and leaked sensitive data:
+
+```bash
+keris scan https://example.com --authorized --auth-chain \
+  --login-username admin --login-password password123
+```
+
+### Risk score (A-F)
+
+Every report ends with a single-letter risk grade (`A` best → `F` critical)
+computed from the severity mix, plus a 0–100 score and a plain-language
+recommendation.
+
+### Race condition / TOCTOU (`--race`)
+
+Fires N identical requests in parallel at once-use endpoints (`/api/claim`,
+`/api/coupon`, `/api/topup`, `/api/vote`, …) to detect double-apply bugs:
+
+```bash
+keris scan https://example.com --authorized --race
+keris scan https://example.com --authorized --race --race-endpoints /api/coupon,/api/topup
+```
+
+### JS dependency CVE check (`--js-deps`)
+
+Parses `package.json` / lockfiles and inline package metadata inside the JS
+bundles the target serves, then matches versions against an offline CVE
+database (`lodash`, `minimist`, `qs`, `axios`, `next`, `webpack`, …):
+
+```bash
+keris scan https://example.com --js-deps
+```
+
+### Favicon / tech fingerprint (`--favicon`)
+
+Computes the Shodan-style mmh3 favicon hash and matches it against a database
+of known product fingerprints (WordPress, GitLab, Jenkins, phpMyAdmin,
+Grafana, …):
+
+```bash
+keris scan https://example.com --favicon
+```
 
 ## Active attacks
 
@@ -509,7 +574,7 @@ keris/
 - [x] **Continuous monitoring (`watch`)**
 - [x] **Interactive terminal UI (`tui`)**
 - [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
-- [x] **Brutal multi-vector DoS (`dos --hammer`)**
+- [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
 - [x] **OOB SSRF detection (`--ssrf`)**

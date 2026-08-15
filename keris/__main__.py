@@ -6,10 +6,12 @@ import os
 import sys
 from typing import List, Optional
 
+import requests
+
 from keris import __version__
 from keris.core.http import KerisHTTP
 from keris.core.logger import info, ok, warn, error, debug, severity, set_quiet
-from keris.core.utils import normalize_url
+from keris.core.utils import normalize_url, urljoin
 from keris.core.config import KerisConfig
 from keris.modules import recon as recon_module
 from keris.modules import discovery as discovery_module
@@ -91,7 +93,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--hunt", action="store_true",
                     help="Jalankan credential hunting (.git, .env/backup, secret cloud) dalam scan")
     ps.add_argument("--pwn", action="store_true",
-                    help="MODE OVERPOWERED: aktifkan SEMUA modul + hunt + chain + triage + browser + exploit + brute + CVE sekaligus (wajib --authorized)")
+                    help="AKTIFKAN SEMUA MODUL SERANGAN: hunt + chain + triage + browser + exploit + brute + CVE sekaligus (wajib --authorized)")
     ps.add_argument("--workers", type=int, help="Jumlah worker untuk brute")
     ps.add_argument("--parallel", action="store_true",
                     help="Scan beberapa target secara paralel (butuh --targets, mempercepat batch besar)")
@@ -125,6 +127,18 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Eksploitasi SSRF: coba ambil metadata cloud + scan port internal (butuh SSRF ditemukan)")
     ps.add_argument("--sensitive-data", action="store_true",
                     help="Scan paparan data sensitif (kredensial/PII/kartu)")
+    ps.add_argument("--auth-chain", action="store_true",
+                    help="Setelah login form (butuh --login-username/--login-password), scan area terproteksi untuk kontrol akses & kebocoran data")
+    ps.add_argument("--jwt-attack", action="store_true",
+                    help="Serang token JWT yang ditemukan: crack weak secret, alg=none, forged admin, expired replay (butuh --authorized)")
+    ps.add_argument("--race", action="store_true",
+                    help="Uji race condition / TOCTOU pada endpoint kritis (request paralel; butuh --authorized)")
+    ps.add_argument("--js-deps", action="store_true",
+                    help="Cek dependency JS yang ditemukan di bundle terhadap CVE offline")
+    ps.add_argument("--favicon", action="store_true",
+                    help="Fingerprint teknologi via hash favicon (cara Shodan)")
+    ps.add_argument("--race-endpoints", default=None,
+                    help="Endpoint tambahan untuk uji race (koma, mis. /api/coupon,/api/topup)")
 
     # recon
     pr = sub.add_parser("recon", parents=[common], help="Recon saja: DNS, headers, stack")
@@ -345,7 +359,7 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pdo.add_argument("--yes", action="store_true",
                      help="KONFIRMASI izin tertulis untuk menjalankan beban nyata")
     pdo.add_argument("--hammer", action="store_true",
-                     help="Mode brutal: jalankan semua vektor serentak dengan concurrency & cap tinggi "
+                     help="Mode berat: jalankan semua vektor serentak dengan concurrency & cap tinggi "
                           "(slowloris + slow POST + flood paralel). HANYA dengan --yes")
     pdo.add_argument("--json-output", help="File output JSON")
 
@@ -841,6 +855,102 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
         if chains:
             ok(f"Correlation: {len(chains)} attack chain terbentuk")
 
+    # auto-auth chain: kredensial form -> login -> scan area terproteksi
+    if getattr(args, "auth_chain", False):
+        if not (getattr(args, "login_username", None) and getattr(args, "login_password", None)):
+            warn("--auth-chain butuh --login-username dan --login-password; dilewati")
+        else:
+            try:
+                from keris.modules.authchain import run_auth_chain
+                res = run_auth_chain(
+                    base, args.login_username, args.login_password,
+                    client, login_paths=cfg.login_paths or None,
+                )
+                for f in res["findings"]:
+                    findings.append(f.to_dict())
+                    severity(f.severity, f"{f.title}: {f.endpoint}")
+                if res["authed"]:
+                    ok(f"Auth chain: {len(res['findings'])} temuan di area terproteksi")
+            except Exception as e:
+                warn(f"Auto-auth chain gagal: {e}")
+
+    # JWT attack: crack & forge token yang ditemukan
+    if getattr(args, "jwt_attack", False):
+        if not getattr(args, "authorized", False):
+            warn("--jwt-attack butuh --authorized; dilewati")
+        else:
+            from keris.modules.jwt import extract_jwts
+            from keris.modules.jwtattack import run_jwt_attack
+            from keris.core.logger import brutal_warning
+
+            tok_src = []
+            for sec in disc.get("secrets", []):
+                tok_src.extend(extract_jwts(sec.get("match", "") or ""))
+            for tok in tok_src:
+                for f in run_jwt_attack(base, tok, client, endpoints=[base.rstrip("/") + "/api/me"]):
+                    findings.append(f.to_dict())
+                    severity(f.severity, f"{f.title}: {f.endpoint}")
+            if tok_src:
+                ok(f"JWT attack: {len(tok_src)} token diuji")
+
+    # race condition / TOCTOU: request paralel ke endpoint kritis
+    if getattr(args, "race", False):
+        if not getattr(args, "authorized", False):
+            warn("--race butuh --authorized; dilewati")
+        else:
+            from keris.modules.race import race_findings
+
+            race_eps = getattr(args, "race_endpoints", None)
+            eps = [e.strip() for e in (race_eps or "").split(",") if e.strip()]
+            if not eps:
+                eps = ["/api/vote", "/api/coupon", "/api/topup", "/api/transfer",
+                       "/api/claim", "/api/redeem", "/api/register"]
+            try:
+                for f in race_findings(base, eps, client, concurrency=8):
+                    findings.append(f.to_dict())
+                    severity(f.severity, f"{f.title}: {f.endpoint}")
+            except Exception as e:
+                warn(f"Race condition test gagal: {e}")
+
+    # JS dependency CVE checker
+    if getattr(args, "js_deps", False):
+        from keris.modules.jsdeps import check_js_dependencies
+
+        js_texts = []
+        js_urls = []
+        for j in disc.get("js_assets", []) or []:
+            try:
+                r = client.get(urljoin(base, j), timeout=12)
+                if r.status_code == 200:
+                    js_texts.append(r.text)
+                    js_urls.append(urljoin(base, j))
+            except requests.RequestException:
+                continue
+        try:
+            for f in check_js_dependencies(base, js_texts, urls=js_urls or None):
+                findings.append(f.to_dict())
+                severity(f.severity, f"{f.title}: {f.endpoint}")
+        except Exception as e:
+            warn(f"JS dependency CVE check gagal: {e}")
+
+    # favicon fingerprint hash
+    if getattr(args, "favicon", False):
+        from keris.modules.favicon import fingerprint_findings
+
+        try:
+            html_src = ""
+            try:
+                r0 = client.get(base, timeout=15)
+                if r0.status_code == 200:
+                    html_src = r0.text or ""
+            except requests.RequestException:
+                pass
+            for f in fingerprint_findings(base, client, html=html_src):
+                findings.append(f.to_dict())
+                info(f"{f.title}: {f.endpoint}")
+        except Exception as e:
+            warn(f"Favicon fingerprint gagal: {e}")
+
     # webhook notifikasi untuk temuan HIGH/CRITICAL
     webhook = getattr(args, "webhook", None)
     if webhook:
@@ -893,8 +1003,8 @@ def _write_outputs(base, result, args, options, cfg) -> None:
                 **{s: sum(1 for f in findings if f.get("severity", "INFO").upper() == s)
                    for s in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")},
             },
-            "recon": recon,
-            "discovery": {"api_endpoints": disc.get("api_endpoints", []),
+            "risk_score": __import__("keris.modules.riskscore", fromlist=["risk_score"]).risk_score(findings),
+            "recon": recon,            "discovery": {"api_endpoints": disc.get("api_endpoints", []),
                           "js_assets": disc.get("js_assets", []),
                           "secrets": disc.get("secrets", [])},
             "findings": findings,
@@ -2031,7 +2141,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for _flag in ("hunt", "chain", "triage", "browser", "exploit",
                       "brute_extended", "exploit_cve", "cache_poisoning",
                       "host_header", "username_enum", "ssrf", "waf",
-                      "ssrf_exploit"):
+                      "ssrf_exploit", "jwt_attack"):
             if not hasattr(args, _flag):
                 setattr(args, _flag, False)
             setattr(args, _flag, True)

@@ -38,7 +38,7 @@ class _Handler(BaseHTTPRequestHandler):
             if "session=authed" in cookie:
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(b"dashboard authed")
+                self.wfile.write(b"dashboard authed: password='secret', api_key='sk_1'")
             else:
                 self.send_response(302)
                 self.send_header("Location", "/login")
@@ -58,6 +58,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'{"ok":1}')
+            return
+        if self.path.startswith("/api/claim"):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true,"applied":1}')
             return
         if self.path.startswith("/wp-login.php") or self.path.startswith("/wp-json"):
             self.send_response(200)
@@ -91,6 +96,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", "session=authed; Path=/")
             self.end_headers()
             return
+        if self.path.startswith("/api/claim"):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true,"applied":1}')
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -98,6 +108,7 @@ class _Handler(BaseHTTPRequestHandler):
 @pytest.fixture(scope="module")
 def server():
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), _Handler)
+    srv.daemon_threads = True
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     yield srv
@@ -228,3 +239,116 @@ class TestAttackPathReport:
 
     def test_attack_path_no_chains(self):
         assert _attack_path_html([]) == ""
+
+
+class TestRiskScore:
+    def test_clean_no_findings(self):
+        from keris.modules.riskscore import risk_score
+
+        rs = risk_score([])
+        assert rs["grade"] == "A"
+        assert rs["score"] == 100.0
+
+    def test_single_high(self):
+        from keris.modules.riskscore import risk_score
+
+        rs = risk_score([{"severity": "HIGH"}, {"severity": "LOW"}])
+        assert rs["grade"] == "C"
+
+    def test_critical_drives_down(self):
+        from keris.modules.riskscore import risk_score
+
+        rs = risk_score([{"severity": "CRITICAL"}] * 3)
+        assert rs["grade"] == "F"
+
+    def test_no_critical_high_caps_grade(self):
+        from keris.modules.riskscore import risk_score
+
+        rs = risk_score([{"severity": "LOW"}] * 9)
+        assert rs["grade"] in ("A", "B")
+
+
+class TestRaceCondition:
+    def test_race_parallel_hits_detected(self):
+        from keris.core.http import KerisHTTP
+        from keris.modules.race import race_findings
+
+        client = KerisHTTP(timeout=10)
+        try:
+            findings = race_findings(BASE, ["/api/claim"], client, concurrency=6)
+            # demo server: /api/claim menjawab 200, tiap request identik -> 6x sukses
+            assert any(f.severity == "HIGH" for f in findings)
+        finally:
+            client.close()
+
+
+class TestJsdeps:
+    def test_extract_packages_json(self):
+        from keris.modules.jsdeps import _extract_packages
+
+        pkgs = _extract_packages('{"dependencies":{"lodash":"4.17.5","jquery":"^3.3.1"}}')
+        assert pkgs["lodash"] == "4.17.5"
+
+    def test_vuln_for_lodash(self):
+        from keris.modules.jsdeps import _vuln_for
+
+        sev, desc = _vuln_for("lodash", "4.17.5")
+        assert sev in ("HIGH", "CRITICAL")
+
+    def test_check_js_dependencies(self):
+        from keris.modules.jsdeps import check_js_dependencies
+
+        findings = check_js_dependencies("http://x", ['{"dependencies":{"lodash":"4.17.5"}}'])
+        assert any("lodash" in f.title for f in findings)
+
+
+class TestFavicon:
+    def test_favicon_urls(self):
+        from keris.modules.favicon import _favicon_urls
+
+        urls = _favicon_urls("http://x", "<link rel='icon' href='/fav.ico'>")
+        assert urls[0].endswith("/fav.ico")
+
+    def test_no_favicon_no_finding(self):
+        from keris.core.http import KerisHTTP
+        from keris.modules.favicon import fingerprint_findings
+
+        client = KerisHTTP(timeout=10)
+        try:
+            assert fingerprint_findings("http://x", client, html="<html></html>") == []
+        finally:
+            client.close()
+
+
+class TestJwtAttack:
+    def test_forge_and_verify(self):
+        from keris.modules.jwtattack import (
+            crack_hs_secret,
+            forge_hs_token,
+        )
+
+        tok = forge_hs_token({"user": "u"}, "secret", "HS256")
+        hit = crack_hs_secret(tok)
+        assert hit is not None
+        assert hit[0] == "secret"
+
+    def test_forge_none_no_sig(self):
+        from keris.modules.jwtattack import forge_none_token
+
+        tok = forge_none_token({"user": "admin"})
+        assert tok.endswith(".")
+        assert len(tok.split(".")) == 3
+
+
+class TestAuthChain:
+    def test_probe_authed_endpoints(self):
+        from keris.core.http import KerisHTTP
+        from keris.modules.authchain import probe_authed_endpoints
+
+        client = KerisHTTP(timeout=10)
+        try:
+            client.post(BASE + "/login", data={"user": "admin", "pass": "secret"})
+            findings = probe_authed_endpoints(BASE, client, probes=["/dashboard"])
+            assert any(f.severity == "HIGH" for f in findings)
+        finally:
+            client.close()

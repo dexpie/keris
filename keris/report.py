@@ -61,6 +61,15 @@ def generate_report(
     total = sum(sev_counts.values())
     lines.append(f"Pengujian terhadap `{_esc(target)}` menemukan **{total}** temuan.")
     lines.append("")
+
+    # Risk score A-F
+    from keris.modules.riskscore import risk_score
+
+    rs = risk_score(findings)
+    lines.append(f"**Risk Score:** `{rs['grade']}` ({rs['score']}/100)")
+    lines.append("")
+    lines.append(f"_{rs['recommendation']}_")
+    lines.append("")
     lines.append("| Severity | Jumlah |")
     lines.append("|---|---|")
     for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):

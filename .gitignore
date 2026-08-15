@@ -19,6 +19,38 @@ keris-report.html
 keris-report.json
 reports/
 
+# Web UI artifacts
+.keris-ui/
+
+# Artifak hasil uji manual terhadap target eksternal (bukan bagian repo)
+*.txt
+!keris/data/*.txt
+its_*
+ise_*
+dex_*
+portal_*
+sso_*
+ssrf_*
+wp_*
+akad_*
+presensi_*
+student_*
+vc_*
+el_*
+rest1.txt
+token_resp.txt
+u10.json
+fetch_users.py
+probe_its.py
+my_apipost.txt
+myconfig.txt
+mylogin.txt
+adminpost.txt
+brute1.txt
+brute2.txt
+brute3.txt
+login_body.html
+
 # Config yang mungkin berisi kredensial
 keris.json
 !keris.json.example

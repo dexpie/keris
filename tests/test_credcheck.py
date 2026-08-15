@@ -26,9 +26,10 @@ class TestCredCheckHelpers:
         with redirect_stdout(buf):
             brutal_warning("PWN")
         out = buf.getvalue()
-        assert "OVERPOWERED" in out
-        assert "RISIKO DITANGGUNG" in out
+        assert "MELANGGAR" in out
+        assert "HUKUM (UU ITE)" in out
         assert "IZIN TERTULIS" in out
+        assert "KEJAHATAN SIBER" in out
 
 
 class TestCredCheckAgainstDemo:
