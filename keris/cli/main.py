@@ -20,11 +20,11 @@ from keris.cli.recon import (
 )
 from keris.cli.report import _cmd_dashboard, _cmd_export
 from keris.cli.scan import (
-    _cmd_agent, _cmd_backdoor, _cmd_bruteforce, _cmd_cachepoison, _cmd_crawl,
-    _cmd_discover, _cmd_enterprise, _cmd_farm, _cmd_fuzz, _cmd_graphql,
-    _cmd_har, _cmd_hidden, _cmd_hostheader, _cmd_jsanalysis, _cmd_openapi,
-    _cmd_params, _cmd_plugins, _cmd_re, _cmd_retest, _cmd_scan, _cmd_sensitive,
-    _cmd_smuggling, _cmd_takeover, _cmd_websocket,
+    _cmd_agent, _cmd_backdoor, _cmd_bruteforce, _cmd_cachepoison, _cmd_chain,
+    _cmd_crawl, _cmd_discover, _cmd_enterprise, _cmd_farm, _cmd_fuzz,
+    _cmd_graphql, _cmd_har, _cmd_hidden, _cmd_hostheader, _cmd_jsanalysis,
+    _cmd_openapi, _cmd_params, _cmd_plugins, _cmd_re, _cmd_retest, _cmd_scan,
+    _cmd_sensitive, _cmd_smuggling, _cmd_takeover, _cmd_websocket,
 )
 
 
@@ -179,6 +179,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_farm(args, cfg, overrides)
         if args.command == "enterprise":
             return _cmd_enterprise(args, cfg, overrides)
+        if args.command == "chain":
+            return _cmd_chain(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

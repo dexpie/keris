@@ -190,6 +190,14 @@ def generate_report(
         lines.extend(paths_markdown(attack_paths))
         lines.append("")
 
+    # MITRE ATT&CK section (hasil --mitre)
+    mitre_chains = (options or {}).get("mitre_chains") or []
+    if mitre_chains:
+        from keris.modules.mitre import mitre_markdown
+
+        lines.extend(mitre_markdown(mitre_chains))
+        lines.append("")
+
     # Attack paths visual (hasil correlation engine)
     chains = [f for f in findings if f.get("source") == "correlation"]
     if chains:

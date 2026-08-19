@@ -36,6 +36,10 @@ def _cmd_scan(args, cfg, overrides) -> int:
         finally:
             client.close()
         options = {"mode": "otomatis dengan Keris", "targets_file": bool(args.targets)}
+        mitre_chains = (result.get("mitre") or {}).get("chains")
+        if mitre_chains:
+            options["mitre"] = True
+            options["mitre_chains"] = mitre_chains
         if len(targets) > 1:
             # tulis per-target ke file terpisah agar tidak saling timpa
             import re as _re
@@ -58,7 +62,8 @@ def _cmd_scan(args, cfg, overrides) -> int:
             if getattr(args, "json_output", None):
                 _write_json_output(base, result["findings"], result["recon"],
                                    result["discovery"], _suffixed(args.json_output, slug),
-                                   attack_paths=result.get("attack_paths"))
+                                   attack_paths=result.get("attack_paths"),
+                                   mitre_chains=mitre_chains)
             if getattr(args, "sarif_output", None):
                 from keris.report_sarif import write_sarif
 
@@ -883,5 +888,87 @@ def _cmd_enterprise(args, cfg, overrides) -> int:
              "di terminal tempat server berjalan.")
         return EXIT_OK
     return EXIT_ERROR
+
+
+def _cmd_chain(args, cfg, overrides) -> int:
+    import json
+
+    if not getattr(args, "from_scan", ""):
+        error("chain membutuhkan --from-scan <file.json>")
+        return EXIT_ERROR
+    try:
+        with open(args.from_scan, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        error(f"Gagal membaca scan JSON: {e}")
+        return EXIT_ERROR
+    findings = data.get("findings") or []
+    target = data.get("target", "")
+
+    from keris.modules.correlation import build_chains, build_paths, save_dot, set_path_depth
+
+    depth = getattr(args, "path_depth", 3) or 3
+    set_path_depth(depth)
+    all_findings = list(findings) + build_chains(findings)
+    paths = build_paths(all_findings, path_depth=depth)
+    if not paths:
+        warn("Tidak ada attack path ditemukan dari scan ini.")
+        return EXIT_OK
+
+    mitre_paths = None
+    mitre_chains = []
+    if getattr(args, "mitre", False):
+        from keris.modules.mitre import (annotate_paths, build_mitre_chains,
+                                         render_mitre_dot)
+        mitre_paths = annotate_paths(paths)
+        mitre_chains = build_mitre_chains(mitre_paths)
+
+    dot_out = getattr(args, "dot_output", "") or ""
+    if dot_out:
+        from keris.modules.mitre import render_mitre_dot
+
+        dot_text = render_mitre_dot(mitre_paths or paths, target) if args.mitre \
+            else None
+        if dot_text is None:
+            from keris.modules.correlation import render_dot
+            dot_text = render_dot(paths, target)
+        try:
+            parent = os.path.dirname(dot_out)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(dot_out, "w", encoding="utf-8") as f:
+                f.write(dot_text)
+            ok(f"DOT tersimpan: {dot_out}")
+        except OSError as e:
+            warn(f"Gagal menulis DOT: {e}")
+    if getattr(args, "graph_only", False):
+        return EXIT_OK
+
+    from keris.modules.mitre import mitre_markdown
+    from keris.modules.correlation import paths_markdown
+
+    body = ["# Attack Paths", "",
+            f"Target: {target} | Path: {len(paths)}", ""]
+    if mitre_chains:
+        body.extend(mitre_markdown(mitre_chains))
+        body.append("")
+    else:
+        body.extend(paths_markdown(paths))
+        body.append("")
+    text = "\n".join(body)
+    if getattr(args, "output", ""):
+        try:
+            parent = os.path.dirname(args.output)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(text)
+            ok(f"Report tersimpan: {args.output}")
+        except OSError as e:
+            error(f"Gagal menulis report: {e}")
+            return EXIT_ERROR
+    else:
+        print(text)
+    return EXIT_OK
 
 

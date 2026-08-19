@@ -97,6 +97,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Maksimal kedalaman attack path (default: 3)")
     ps.add_argument("--dot-output", default="",
                     help="File Graphviz .dot untuk visualisasi attack paths (butuh --chain)")
+    ps.add_argument("--mitre", action="store_true",
+                    help="Anotasi attack paths dengan MITRE ATT&CK technique + tactic progression (butuh --chain)")
+    ps.add_argument("--mitre-dot-output", default="",
+                    help="File Graphviz .dot dengan label MITRE untuk attack paths (butuh --mitre)")
     ps.add_argument("--triage", action="store_true",
                     help="AI/rule-based triage: tandai false positive + tulis executive summary (butuh KERIS_LLM_API_KEY untuk AI)")
     ps.add_argument("--browser", action="store_true",
@@ -718,6 +722,17 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pent.add_argument("--admin-password", default="admin123", help="Password admin")
     pent.add_argument("--admin-email", default="", help="Email admin")
 
+    # chain (attack path / MITRE reporting offline dari hasil scan)
+    pch = sub.add_parser("chain", help="Analisis attack paths dari hasil scan JSON (correlation + MITRE ATT&CK)")
+    pch.add_argument("--from-scan", help="File hasil scan JSON (wajib)")
+    pch.add_argument("--mitre", action="store_true",
+                     help="Anotasi dengan MITRE ATT&CK technique + tactic progression")
+    pch.add_argument("--path-depth", type=int, default=3, help="Kedalaman maksimal path (default: 3)")
+    pch.add_argument("--output", default="", help="File output Markdown (default: stdout)")
+    pch.add_argument("--dot-output", default="", help="File Graphviz .dot (--mitre untuk versi MITRE)")
+    pch.add_argument("--graph-only", action="store_true",
+                     help="Hanya output DOT, tanpa teks markdown")
+
     return p.parse_args(argv)
 
 
@@ -1302,6 +1317,27 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                 else:
                     warn(f"Gagal menulis DOT: {dot_out}")
             attack_paths.extend(paths)
+        # MITRE ATT&CK annotation (v0.18.0)
+        if getattr(args, "mitre", False):
+            from keris.modules.mitre import (annotate_paths, build_mitre_chains,
+                                             render_mitre_dot)
+            info("=== MITRE ATT&CK ===")
+            mitre_paths = annotate_paths(paths)
+            attack_paths[:] = mitre_paths
+            mitre_chains = build_mitre_chains(mitre_paths)
+            mitre_dot = getattr(args, "mitre_dot_output", "") or ""
+            if mitre_chains:
+                ok(f"MITRE: {len(mitre_chains)} chain dengan tactic progression")
+            if mitre_dot:
+                try:
+                    parent = os.path.dirname(mitre_dot)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    with open(mitre_dot, "w", encoding="utf-8") as f:
+                        f.write(render_mitre_dot(mitre_paths, base))
+                    ok(f"MITRE DOT tersimpan: {mitre_dot}")
+                except OSError:
+                    warn(f"Gagal menulis MITRE DOT: {mitre_dot}")
 
     # auto-auth chain: kredensial form -> login -> scan area terproteksi
     if getattr(args, "auth_chain", False):
@@ -1455,6 +1491,8 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     result = {"recon": recon, "discovery": disc, "findings": findings}
     if attack_paths:
         result["attack_paths"] = attack_paths
+    if locals().get("mitre_chains"):
+        result["mitre"] = {"chains": mitre_chains}
     if passive:
         result["passive"] = passive
     return result
@@ -1468,7 +1506,7 @@ def _ensure_parent(path: str) -> None:
 
 
 def _write_json_output(base, findings, recon, disc, path, exec_note=None,
-                       attack_paths=None) -> None:
+                       attack_paths=None, mitre_chains=None) -> None:
     """Tulis hasil scan ke file JSON."""
     _ensure_parent(path)
     from keris.confidence import aggregate_confidence
@@ -1497,6 +1535,8 @@ def _write_json_output(base, findings, recon, disc, path, exec_note=None,
         payload["executive_summary"] = exec_note
     if attack_paths:
         payload["attack_paths"] = attack_paths
+    if mitre_chains:
+        payload["mitre"] = {"chains": mitre_chains}
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, default=str)
     ok(f"JSON output: {path}")
@@ -1541,7 +1581,7 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         ok(f"PDF output: {args.pdf_output}")
     if getattr(args, "json_output", None):
         _write_json_output(base, findings, recon, disc, args.json_output, exec_note,
-                           result.get("attack_paths"))
+                           result.get("attack_paths"), options.get("mitre_chains"))
     if getattr(args, "sarif_output", None):
         from keris.report_sarif import write_sarif
 

@@ -159,6 +159,8 @@ never expose it publicly.
 | `crack` | Offline hash cracking: MD5/SHA1/SHA256/NTLM/MD5-Crypt via wordlist or short brute (authorized only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 | `scan --templates` | Template/rule engine: YAML detections (`.env`, `.git`, backups, phpinfo, Actuator, directory listing, Swagger) with AND/OR matchers |
+| `scan --mitre` | Annotate attack chains with MITRE ATT&CK techniques + tactic progression (needs `--chain`) |
+| `chain` | Offline attack-path analysis from a scan JSON: correlation + MITRE ATT&CK, Markdown/DOT output |
 | `scan --pivot-auto` | After an SSRF/RCE is found, auto-pivot: detect internal interfaces, scan the internal network, try default creds (socks5/ssh/chisel; authorized only) |
 | `agent` | AI pentesting agent: plan + execute a goal step-by-step, with checkpoint/resume and a full Markdown report |
 | `farm` | Distributed scanning cluster: master/worker nodes share scan jobs over HTTP (register, claim, submit, unified report) |
@@ -194,6 +196,28 @@ Examples it detects:
 Chained findings carry a `"chain"` marker and `"source": "correlation"` in the
 JSON output, so they're easy to tell apart from raw findings. The Markdown and
 HTML reports render them as a visual **Attack Paths** section.
+
+### MITRE ATT&CK mapping (`--mitre`)
+
+Annotate every attack path with MITRE ATT&CK technique IDs and tactics, and
+show the full **tactic progression** (Reconnaissance to Impact) the way an
+analyst would read it:
+
+```bash
+keris scan https://example.com --chain --mitre --json-output scan.json
+keris chain --from-scan scan.json --mitre --output attack-paths.md
+keris chain --from-scan scan.json --mitre --graph-only --dot-output graph.dot
+```
+
+- Every step is mapped to a technique (T1190, T1189, T1059, T1552.001, ...)
+  with tactic, so a path reads like `Initial Access -> Credential Access ->
+  Impact`.
+- The Markdown report renders a **MITRE Tactic Progression** section per path
+  with `[T1190] Exploit Public-Facing Application (Initial Access)` style
+  steps and the final impact.
+- `--mitre` also emits a MITRE-labelled Graphviz `.dot` (`--mitre-dot-output`)
+  and a `mitre.chains` block in the JSON output.
+- Technique mapping is hardcoded (no external `mitre-attack` dependency).
 
 ### Automatic pivoting (`--pivot-auto`)
 
