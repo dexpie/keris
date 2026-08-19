@@ -160,7 +160,10 @@ class TestReverse:
         sec = extract_secrets(text)
         types = {s["type"] for s in sec}
         assert "api_key" in types
-        assert "aws" in types
+        assert "AWS Access Key" in types or "aws" in types
+        # no duplicated match strings
+        matches = [s["match"] for s in sec]
+        assert len(matches) == len(set(matches))
 
     def test_stats_obfuscation(self):
         from keris.modules.reverse import stats
@@ -223,3 +226,74 @@ class TestBackdoor:
                 "<a href='/page2'>ok</a></html>")
         fs = scan_page(html, "https://example.com", "https://example.com")
         assert fs == []
+
+    def test_private_ip_not_flagged(self):
+        from keris.modules.backdoor import _is_suspicious_host
+
+        bad, reason = _is_suspicious_host("192.168.1.10")
+        assert not bad
+        bad, reason = _is_suspicious_host("10.0.0.5")
+        assert not bad
+        bad, reason = _is_suspicious_host("172.16.5.5")
+        assert not bad
+        bad, reason = _is_suspicious_host("127.0.0.1")
+        assert not bad
+
+    def test_public_ip_flagged(self):
+        from keris.modules.backdoor import _is_suspicious_host
+
+        bad, reason = _is_suspicious_host("8.8.8.8")
+        assert bad
+        bad, reason = _is_suspicious_host("185.199.10.10")
+        assert bad
+
+    def test_private_ip_script_from_other_host_flagged(self):
+        from keris.modules.backdoor import scan_page
+
+        # script dari IP privat BEDA host (mis. target di VPS, script dari intranet)
+        html = '<script src="http://192.168.1.20/x.js"></script>'
+        fs = scan_page(html, "https://example.com", "https://example.com")
+        assert any("Script eksternal" in f.title for f in fs)
+
+
+class TestReverseEndpointExtract:
+    def test_fetch_and_axios(self):
+        from keris.modules.reverse import extract_endpoints
+
+        text = 'fetch("/api/users?page=2"); axios.post("/v1/items");'
+        eps = extract_endpoints(text, "https://x.test")
+        assert "/api/users" in eps
+        assert "/v1/items" in eps
+
+    def test_dedupe_secrets(self):
+        from keris.modules.reverse import extract_secrets
+
+        text = "AKIAABCDEFGHIJKLMNOP AKIAABCDEFGHIJKLMNOP"
+        sec = extract_secrets(text)
+        assert len({s["match"] for s in sec}) == len([s for s in sec])
+        assert len(sec) >= 1
+
+    def test_payload_secret_slack(self):
+        from keris.modules.reverse import extract_secrets
+
+        fake_slack = "xox" + "b-" + "1234567890-abcdefghijklmnopqrst"
+        sec = extract_secrets('token = "' + fake_slack + '"')
+        assert any(s["type"] == "Slack Token" for s in sec)
+
+
+class TestRecorderCookie:
+    def test_wrap_captures_cookie(self):
+        from keris.har import RequestsRecorder
+
+        rec = RequestsRecorder()
+
+        class FakeClient:
+            session = type("S", (), {"headers": {"Cookie": "a=1; b=2"}})()
+
+            def request(self, method, url, **kwargs):
+                return None
+
+        rec.wrap(FakeClient()).request("GET", "https://x.test/")
+        entry = rec.entries[0]
+        cookies = {c["name"]: c["value"] for c in entry["request"]["cookies"]}
+        assert cookies == {"a": "1", "b": "2"}

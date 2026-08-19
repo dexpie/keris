@@ -58,14 +58,28 @@ def _host(url: str) -> str:
     return (url or "").strip()
 
 
+def _is_private_ip(host: str) -> bool:
+    if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host or ""):
+        return False
+    parts = host.split(".")
+    first, second = parts[0], parts[1]
+    return (
+        first == "127" or first == "10"
+        or (first == "172" and 16 <= int(second) <= 31)
+        or (first == "192" and second == "168")
+        or (first == "169" and second == "254")
+        or first == "0"
+    )
+
+
 def _is_suspicious_host(host: str) -> Tuple[bool, str]:
     if not host:
         return False, ""
-    # IP publik (bukan localhost/privat) sebagai host script = mencurigakan
+    # IP publik (bukan localhost/privat/loopback) sebagai host script = mencurigakan
     if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
-        parts = host.split(".")
-        if parts[0] != "127" and parts[0] != "10" and parts[0] not in ("192", "172") or len(parts) == 4:
-            return True, f"script dari IP publik langsung ({host})"
+        if _is_private_ip(host):
+            return False, ""
+        return True, f"script dari IP publik langsung ({host})"
     base = host.split(".")[-2:] if "." in host else [host]
     tld = base[-1] if base else ""
     reg_domain = ".".join(base) if len(base) >= 2 else host
@@ -120,6 +134,14 @@ def scan_page(html: str, page_url: str, base: str = "") -> List[Finding]:
             _add("MEDIUM", "Script eksternal dari sumber mencurigakan",
                  src, f"{reason}. Audit apakah aset ini benar-benar milik aplikasi.",
                  f"<script src='{src}'>")
+        elif _is_private_ip(host):
+            # script menunjuk ke jaringan privat lain: indikasi intranet/panel/pivot
+            suspicious_scripts += 1
+            _add("MEDIUM", "Script eksternal menunjuk ke IP privat",
+                 src,
+                 f"Script diambil dari {host} (jaringan privat). Bila target adalah "
+                 "server publik, ini bisa menandakan kompromi/akses internal.",
+                 f"<script src='{src}'>")
 
     for m in _IFRAME_SRC_RE.finditer(html):
         src = m.group(1)
@@ -133,6 +155,13 @@ def scan_page(html: str, page_url: str, base: str = "") -> List[Finding]:
             suspicious_iframes += 1
             _add("MEDIUM", "iframe tersembunyi dari sumber mencurigakan",
                  src, f"{reason}. iframe pihak ketiga sering dipakai untuk ad-inject/redirect.",
+                 f"<iframe src='{src}'>")
+        elif _is_private_ip(host):
+            suspicious_iframes += 1
+            _add("MEDIUM", "iframe menunjuk ke IP privat",
+                 src,
+                 f"iframe menunjuk ke {host} (jaringan privat). Bisa indikasi "
+                 "kompromi / konten internal.",
                  f"<iframe src='{src}'>")
 
     # meta refresh ke domain lain

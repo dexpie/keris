@@ -83,6 +83,12 @@ class RequestsRecorder:
             r = original(method, url, **kwargs)
             headers = {k: v for k, v in (kwargs.get("headers") or {}).items()}
             cookies = {}
+            cookie_hdr = headers.get("Cookie") or client.session.headers.get("Cookie")
+            if cookie_hdr:
+                for part in str(cookie_hdr).split(";"):
+                    if "=" in part:
+                        k, v = part.strip().split("=", 1)
+                        cookies[k] = v
             data = kwargs.get("data") or kwargs.get("json")
             if isinstance(data, (dict, list)):
                 import json as _json

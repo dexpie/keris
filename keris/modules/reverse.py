@@ -24,14 +24,18 @@ _ATOB_RE = re.compile(r"atob\s*\(\s*[\"']([^\"']+)[\"']\s*\)", re.I)
 _HEX_STR_RE = re.compile(r"\\x([0-9a-fA-F]{2})")
 _UNI_STR_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
 
-# pola secret (dipakai ulang ringkas dari payloads)
-_SECRET_RE = {
+# pola secret (gabungan: paket payloads yang lengkap + pola spesifik reverse)
+from keris.payloads import SECRET_PATTERNS as _PAYLOAD_SECRET_PATTERNS
+
+_SECRET_RE = {name: re.compile(pat) for name, pat in _PAYLOAD_SECRET_PATTERNS.items()}
+_SECRET_RE.update({
     "api_key": re.compile(r"(?i)(?:api[_-]?key|apikey|access[_-]?key)\s*[:=]\s*[\"']([^\"']{8,})[\"']"),
     "aws": re.compile(r"\b(AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b"),
     "github_token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
     "google_key": re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}\b"),
-    "jwt": re.compile(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"),
-}
+    "generic_key": re.compile(r"(?i)\b(?:access[_-]?token|secret|client[_-]?secret)\s*[:=]\s*[\"']([A-Za-z0-9_\-\.]{12,})[\"']"),
+    "bearer_hardcoded": re.compile(r"(?i)['\"]Authorization['\"]\s*:\s*['\"]Bearer\s+([A-Za-z0-9_\-\.]{12,})['\"]"),
+})
 
 _DOMAIN_RE = re.compile(r"https?://[A-Za-z0-9.\-]+(?::\d+)?(?:/[A-Za-z0-9_\-./?&=%~]*)?")
 _ENDPOINT_RE = re.compile(r"[\"'](/[a-zA-Z0-9_\-./]{2,120})[\"']")
@@ -114,6 +118,17 @@ def extract_endpoints(text: str, base: str = "") -> List[str]:
         p = m.group(1)
         if re.match(r"^/(api|v\d|graphql|internal|admin|private|internal-api)", p, re.I):
             eps.add(p)
+    # fetch() / axios / XMLHttpRequest / $.ajax dengan string literal
+    for m in re.finditer(r"(?:fetch|axios|XMLHttpRequest|\$\.ajax)\(?[\"']([^\"']{2,160})[\"']", text):
+        u = m.group(1)
+        if u.startswith("/"):
+            eps.add(u.split("?")[0])
+        elif u.startswith(("http://", "https://")):
+            if base and base.rstrip("/") in u:
+                rest = u.split(base.rstrip("/"))[-1]
+                if rest.startswith("/"):
+                    eps.add(rest.split("?")[0])
+    # string template `https://.../api/...` dan `/graphql` literal
     for m in _DOMAIN_RE.finditer(text):
         u = m.group(0)
         if base and base.rstrip("/") in u:
@@ -127,9 +142,14 @@ def extract_endpoints(text: str, base: str = "") -> List[str]:
 
 def extract_secrets(text: str) -> List[Dict]:
     secrets = []
+    seen = set()
     for name, pat in _SECRET_RE.items():
         for m in pat.finditer(text):
-            secrets.append({"type": name, "match": m.group(0)[:120]})
+            match = m.group(0)[:120]
+            if match in seen:
+                continue
+            seen.add(match)
+            secrets.append({"type": name, "match": match})
     return secrets
 
 
