@@ -93,6 +93,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ps.add_argument("--ssrf-callback", help="URL kolaborator (interactsh/Burp) untuk konfirmasi SSRF")
     ps.add_argument("--chain", action="store_true",
                     help="Correlation engine: gabungkan temuan rendah jadi attack chain kritis")
+    ps.add_argument("--path-depth", type=int, default=3,
+                    help="Maksimal kedalaman attack path (default: 3)")
+    ps.add_argument("--dot-output", default="",
+                    help="File Graphviz .dot untuk visualisasi attack paths (butuh --chain)")
     ps.add_argument("--triage", action="store_true",
                     help="AI/rule-based triage: tandai false positive + tulis executive summary (butuh KERIS_LLM_API_KEY untuk AI)")
     ps.add_argument("--browser", action="store_true",
@@ -747,6 +751,7 @@ def _get_plugins(args, cfg: KerisConfig) -> List[dict]:
 
 def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client: KerisHTTP) -> dict:
     findings = []
+    attack_paths = []
 
     # passive recon (crt.sh/whois) — opsional, tidak menyentuh target langsung
     passive = {}
@@ -1178,7 +1183,7 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
     # correlation engine: chain temuan rendah menjadi chain kritis
     if getattr(args, "chain", False) and findings:
         info("=== CORRELATION ===")
-        from keris.modules.correlation import build_chains
+        from keris.modules.correlation import build_chains, build_paths, save_dot, set_path_depth
 
         chains = build_chains(findings)
         for c in chains:
@@ -1186,6 +1191,20 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             severity(c["severity"], f"{c['title']}: {c['endpoint']}")
         if chains:
             ok(f"Correlation: {len(chains)} attack chain terbentuk")
+        # attack path generator (v0.15.0)
+        depth = getattr(args, "path_depth", 3) or 3
+        set_path_depth(depth)
+        paths = build_paths(findings, path_depth=depth)
+        if paths:
+            ok(f"Attack paths: {len(paths)} path ditemukan")
+            dot_out = getattr(args, "dot_output", "") or ""
+            if dot_out:
+                saved = save_dot(paths, dot_out, base)
+                if saved:
+                    ok(f"DOT tersimpan: {saved}")
+                else:
+                    warn(f"Gagal menulis DOT: {dot_out}")
+            attack_paths.extend(paths)
 
     # auto-auth chain: kredensial form -> login -> scan area terproteksi
     if getattr(args, "auth_chain", False):
@@ -1337,6 +1356,8 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
             info(f"Filter confidence >= {min_conf}: {before} -> {len(findings)} temuan")
 
     result = {"recon": recon, "discovery": disc, "findings": findings}
+    if attack_paths:
+        result["attack_paths"] = attack_paths
     if passive:
         result["passive"] = passive
     return result
@@ -1349,7 +1370,8 @@ def _ensure_parent(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
-def _write_json_output(base, findings, recon, disc, path, exec_note=None) -> None:
+def _write_json_output(base, findings, recon, disc, path, exec_note=None,
+                       attack_paths=None) -> None:
     """Tulis hasil scan ke file JSON."""
     _ensure_parent(path)
     from keris.confidence import aggregate_confidence
@@ -1376,6 +1398,8 @@ def _write_json_output(base, findings, recon, disc, path, exec_note=None) -> Non
     }
     if exec_note:
         payload["executive_summary"] = exec_note
+    if attack_paths:
+        payload["attack_paths"] = attack_paths
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, default=str)
     ok(f"JSON output: {path}")
@@ -1403,6 +1427,8 @@ def _write_outputs(base, result, args, options, cfg) -> None:
     _save_history(base, history)
     options = dict(options or {})
     options["history"] = history[-30:]
+    if result.get("attack_paths"):
+        options["attack_paths"] = result["attack_paths"]
 
     if args.output:
         _ensure_parent(args.output)
@@ -1417,7 +1443,8 @@ def _write_outputs(base, result, args, options, cfg) -> None:
         write_pdf_report(recon, disc, findings, args.pdf_output, base, options)
         ok(f"PDF output: {args.pdf_output}")
     if getattr(args, "json_output", None):
-        _write_json_output(base, findings, recon, disc, args.json_output, exec_note)
+        _write_json_output(base, findings, recon, disc, args.json_output, exec_note,
+                           result.get("attack_paths"))
     if getattr(args, "sarif_output", None):
         from keris.report_sarif import write_sarif
 

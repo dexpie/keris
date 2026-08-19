@@ -183,6 +183,14 @@ def generate_report(
         lines.append("")
 
     # Attack paths visual (hasil correlation engine)
+    attack_paths = (options or {}).get("attack_paths") or []
+    if attack_paths:
+        from keris.modules.correlation import paths_markdown
+
+        lines.extend(paths_markdown(attack_paths))
+        lines.append("")
+
+    # Attack paths visual (hasil correlation engine)
     chains = [f for f in findings if f.get("source") == "correlation"]
     if chains:
         lines.append("## 6. Attack Paths")

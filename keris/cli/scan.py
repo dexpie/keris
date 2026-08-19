@@ -57,7 +57,8 @@ def _cmd_scan(args, cfg, overrides) -> int:
                                  _suffixed(args.pdf_output, slug), base, options)
             if getattr(args, "json_output", None):
                 _write_json_output(base, result["findings"], result["recon"],
-                                   result["discovery"], _suffixed(args.json_output, slug))
+                                   result["discovery"], _suffixed(args.json_output, slug),
+                                   attack_paths=result.get("attack_paths"))
             if getattr(args, "sarif_output", None):
                 from keris.report_sarif import write_sarif
 
