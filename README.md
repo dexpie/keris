@@ -1,8 +1,8 @@
 # keris
 
 `keris` is a black-box web pentest toolkit that lives in your terminal. Give it
-one URL and it runs the whole job — recon, discovery, vulnerability scanning,
-and a report — in a single command. It was born from real testing against
+one URL and it runs the whole job (recon, discovery, vulnerability scanning,
+and a report) in a single command. It was born from real testing against
 production sites (Next.js/Vercel, PHP/LiteSpeed, React SPAs), so the defaults
 are polite: it doesn't hammer targets and it learns to back off when the server
 starts rate-limiting you.
@@ -25,7 +25,7 @@ starts rate-limiting you.
   <img src="docs/screenshots/scan.png" alt="Keris scan running in the terminal" width="720">
 </p>
 
-## ⚠️ Warning — active attack features
+## ⚠️ Warning: active attack features
 
 Keris can run **active attacks**: auto-exploitation, brute-force with extended
 wordlists, credential validation against a live login, credential hunting
@@ -72,7 +72,7 @@ keris scan https://example.com -o report.md --templates
 Setiap temuan kini membawa **Standard Finding Schema v1.0.0** (`finding_schema`
 di JSON, `id` deterministik, `cwe`, `source`) plus **confidence score** (0..1)
 dari Confidence engine: skor tinggi untuk bukti langsung (browser, exploit,
-git dump), rendah untuk sinyal heuristik — lengkap dengan daftar temuan yang
+git dump), rendah untuk sinyal heuristik, lengkap dengan daftar temuan yang
 butuh verifikasi manual di laporan.
 
 Template engine (v0.13.0) menambah deteksi deklaratif berakurasi tinggi:
@@ -80,7 +80,7 @@ template YAML (mirip Nuclei, ringan) dengan matchers `status`/`word`/`regex`
 dan kondisi AND/OR. Temuan hanya lahir bila **semua** matcher terpenuhi, jadi
 false positive rendah. Pack bawaan di `keris/data/templates` (`.env` terekspos,
 `.git/config`, backup/dump database, phpinfo, Spring Actuator, directory
-listing, Swagger) — tambahkan `--templates-dir` untuk pack kustom.
+listing, Swagger), tambahkan `--templates-dir` untuk pack kustom.
 
 Try it in 30 seconds against a demo server that is deliberately full of holes:
 
@@ -106,9 +106,9 @@ python -m keris serve
 
 Two buttons worth knowing:
 
-- **CARIKRITIKAL** — turns on every module plus the authorized active attacks
+- **CARIKRITIKAL**: turns on every module plus the authorized active attacks
   at once, then filters results down to CRITICAL/HIGH only.
-- **Uji DoS** — an app-layer resilience test (slowloris / slow POST / measured
+- **Uji DoS**: an app-layer resilience test (slowloris / slow POST / measured
   flood) with caps on duration and request count. It requires an explicit
   written-permission checkbox.
 
@@ -196,7 +196,7 @@ Directory brute-force detects the target's technology stack from recon headers
 (WordPress, Laravel, Django, Node/Express, Java/Spring) and automatically merges
 the matching extra wordlist, so it probes framework-specific paths like
 `/wp-json/wp/v2/users`, `/storage/logs/laravel.log`, `/actuator/env` or
-`/api/auth/__nextjs_original-stack-frame` — no manual wordlist switching.
+`/api/auth/__nextjs_original-stack-frame`, no manual wordlist switching.
 
 ### AI triage + executive summary (`--triage`)
 
@@ -231,7 +231,7 @@ keris scan https://example.com --browser --screenshot evidence.png
 - `--screenshot` captures full-page evidence.
 - Reuses your `--login-username` / `--login-password` to run the pass while
   authenticated.
-- Gracefully skips with a hint if Playwright isn't installed — the rest of the
+- Gracefully skips with a hint if Playwright isn't installed, the rest of the
   toolkit keeps working.
 
 ### Auto-ticketing (`--ticket`)
@@ -269,12 +269,12 @@ keris watch https://example.com --interval 3600 --webhook <slack-url>
   `alertable_new` figure for severity above `--min-severity`.
 - Alerts go to Slack / Discord / Telegram webhooks.
 - Perfect under cron: `0 */6 * * * keris watch https://app.example.com --interval 3600`.
-- Exit code 1 when a cycle found alertable findings — usable as a CI check.
+- Exit code 1 when a cycle found alertable findings, usable as a CI check.
 
 ### Interactive TUI (`tui`)
 
-A terminal dashboard that streams the scan live — progress bar, current stage,
-and the latest log lines — with no extra dependencies (pure ANSI, works on
+A terminal dashboard that streams the scan live: progress bar, current stage,
+and the latest log lines, with no extra dependencies (pure ANSI, works on
 Windows Terminal too):
 
 ```bash
@@ -293,16 +293,16 @@ keris scan https://example.com --hunt
 
 What it checks:
 
-- **`.git` exposure** — probes `/.git/HEAD`, `/.git/config`, `/.git/index`, and
+- **`.git` exposure**: probes `/.git/HEAD`, `/.git/config`, `/.git/index`, and
   parses the git index binary to reconstruct the file layout (filename
   disclosure). A dumpable `.git` means the whole source tree may be recoverable
-  offline — flagged CRITICAL. `/.git/config` leaks the remote repo URL.
-- **Config & backup files** — `.env`, `.env.*`, `wp-config.php`, `config.*`,
+  offline, flagged CRITICAL. `/.git/config` leaks the remote repo URL.
+- **Config & backup files**: `.env`, `.env.*`, `wp-config.php`, `config.*`,
   `*.bak`, `dump.sql`, and ~25 more, with a secret check on the contents.
-- **Cloud & app secrets** — AWS access keys, Google API keys / OAuth client
+- **Cloud & app secrets**: AWS access keys, Google API keys / OAuth client
   secrets, GitHub and Slack tokens, OpenAI keys, plus generic password / API
   key patterns across pages and JS bundles.
-- **`--verify`** — sends a single metadata request to AWS
+- **`--verify`**: sends a single metadata request to AWS
   (`GetAccessKeyLastUsed`) to check whether a discovered AWS key is live.
 
 Credentials are redacted in reports (`AKIA…MPLE`); full values never hit the
@@ -317,13 +317,13 @@ console or JSON output.
 keris dos https://example.com --yes --hammer --concurrency 50 --duration 60
 ```
 
-Same safety rails as normal DoS — `--yes` is mandatory and it never runs
+Same safety rails as normal DoS, `--yes` is mandatory and it never runs
 against a target you don't have written permission to test. After the hammer it
 checks whether the service still answers and reports a HIGH finding if not.
 
 ### One-flag everything (`--pwn`)
 
-The full-attack switch. Turns on **every** module in one go — recon,
+The full-attack switch. Turns on **every** module in one go: recon,
 discovery, hunt, browser, correlation chains, triage, auto-exploit, brute-force
 extended, and CVE probes:
 
@@ -332,7 +332,7 @@ keris scan https://example.com --pwn --authorized
 ```
 
 `--pwn` refuses to run without `--authorized` and prints the red warning
-banner. It is the maximum-effort pass: expect slow scans and a lot of noise —
+banner. It is the maximum-effort pass: expect slow scans and a lot of noise,
 but also a very complete picture.
 
 ### Credential validation (`credcheck`)
@@ -348,7 +348,7 @@ keris credcheck https://example.com --creds-file creds.txt
 
 Detects HTML login forms (auto-fills username/password, preserves CSRF hidden
 fields) with a fallback to HTTP basic auth. Every confirmed credential is
-reported as HIGH so the owner can reset it immediately. Authorized use only —
+reported as HIGH so the owner can reset it immediately. Authorized use only,
 this is a live login attempt.
 
 ### Exploit kit (`exploit`)
@@ -363,18 +363,18 @@ keris exploit https://example.com --authorized --types xxe --callback https://co
 keris exploit https://example.com --authorized --types lfi,rfi --callback https://interactsh
 ```
 
-- **SQLi** — fingerprints the DB engine (MySQL/PostgreSQL/MSSQL/SQLite/Oracle)
+- **SQLi**: fingerprints the DB engine (MySQL/PostgreSQL/MSSQL/SQLite/Oracle)
   via error + boolean probes, counts UNION columns, then dumps db name, version
   and user through a reflected column.
-- **LFI / path traversal** — `../../etc/passwd` (with 8 encoding bypasses),
+- **LFI / path traversal**: `../../etc/passwd` (with 8 encoding bypasses),
   `php://filter` base64 extraction, and LFI→RCE via log poisoning
   (`/var/log/apache2/access.log` + injected PHP marker).
-- **RFI** — loads your callback URL into the parameter; confirm the hit in your
+- **RFI**: loads your callback URL into the parameter; confirm the hit in your
   collaborator (`--callback`).
-- **Upload bypass** — double extensions, null byte, case tricks, MIME swaps,
+- **Upload bypass**: double extensions, null byte, case tricks, MIME swaps,
   GIF polyglot, `.htaccess`; then verifies the uploaded file actually
   **executes** (RCE proof).
-- **XXE** — inline file read (`file:///etc/passwd`), PHP-wrapper base64, and
+- **XXE**: inline file read (`file:///etc/passwd`), PHP-wrapper base64, and
   blind OOB via external DTD (`--callback`).
 
 ### Reverse-shell helper (`shell`)
@@ -391,7 +391,7 @@ keris shell https://example.com --endpoint "/cgi?cmd=x" --authorized   # read-on
 ### SOCKS5 pivot (`pivot`)
 
 Turns a confirmed SSRF into a SOCKS5 proxy into the target's internal network
-(HTTP pivoting through the vulnerable parameter — great for reaching internal
+(HTTP pivoting through the vulnerable parameter, great for reaching internal
 dashboards and admin panels):
 
 ```bash
@@ -407,7 +407,7 @@ Ctrl+C).
 
 Starts a tiny DNS server that answers the same hostname with a legit IP first
 (to pass server-side allowlist validation) and your target IP on subsequent
-queries — the classic SSRF/SOP bypass:
+queries, the classic SSRF/SOP bypass:
 
 ```bash
 keris rebind --domain rebind.example.com --target-ip 169.254.169.254 --authorized --yes
@@ -421,7 +421,7 @@ bind to 127.0.0.1 for local labs).
 
 When `/.git/` is publicly readable, downloads the index, then every blob
 object (`/.git/objects/xx/rest`), decompresses them and reconstructs the
-committed source tree — including secrets that were ever committed:
+committed source tree, including secrets that were ever committed:
 
 ```bash
 keris gitdump https://example.com --authorized --outdir ./source-dump
@@ -439,15 +439,15 @@ Systematically probes access-control bypasses against protected endpoints:
 keris authbypass https://example.com --endpoint /admin --authorized
 ```
 
-- **Verb tampering** — `GET/POST/PUT/PATCH/OPTIONS/HEAD/TRACE` on the same URL.
-- **Path normalization** — `//admin`, `/./admin`, `/admin/..;/admin`, trailing
+- **Verb tampering**: `GET/POST/PUT/PATCH/OPTIONS/HEAD/TRACE` on the same URL.
+- **Path normalization**: `//admin`, `/./admin`, `/admin/..;/admin`, trailing
   dot/semicolon/mixed-case variants.
-- **Role-param pollution** — `?admin=true`, `?role=admin`, `X-Forwarded-For`,
+- **Role-param pollution**: `?admin=true`, `?role=admin`, `X-Forwarded-For`,
   `X-Original-URL` header spoofing.
 
 ### Password spraying (`spray`)
 
-Anti-lockout login guessing — one password per account with a delay, optional
+Anti-lockout login guessing, one password per account with a delay, optional
 proxy rotation, and automatic stop on rate-limit/lockout markers:
 
 ```bash
@@ -480,16 +480,16 @@ keris cloud https://example.com --from-scan report.json --authorized
 keris cloud https://example.com --bucket legacy-assets --authorized
 ```
 
-- **AWS** — validates access keys against STS `GetCallerIdentity` (live check),
+- **AWS**: validates access keys against STS `GetCallerIdentity` (live check),
   flags expired/denied keys.
-- **S3/GCS** — dangling bucket names (`NoSuchBucket` → subdomain takeover).
-- **GCP / Azure** — identifies service-account emails and tenant IDs leaked in
+- **S3/GCS**: dangling bucket names (`NoSuchBucket` → subdomain takeover).
+- **GCP / Azure**: identifies service-account emails and tenant IDs leaked in
   responses.
 
 ### XSS hook / C2 capture (`xsshook`)
 
 Starts a capture server that stores the cookie, keylog, and DOM snapshot your
-`hook.js` beacon sends back — turning a "reflected" XSS finding into proof of
+`hook.js` beacon sends back, turning a "reflected" XSS finding into proof of
 impact:
 
 ```bash
@@ -499,12 +499,12 @@ keris xsshook --bind 0.0.0.0 --port 9999 --authorized --yes
 ```
 
 Needs `--authorized --yes` and keeps running until Ctrl+C. Sensitive
-connection handlers return the **shell command to remove** the capture files —
+connection handlers return the **shell command to remove** the capture files;
 never leave captured cookies on disk after a test.
 
 ### Kubernetes attack (`k8s`)
 
-Enumerates a Kubernetes API server and tests anonymous access — directly, or
+Enumerates a Kubernetes API server and tests anonymous access, directly, or
 pivoted through a confirmed SSRF:
 
 ```bash
@@ -527,19 +527,19 @@ keris crack --hash 5f4dcc3b5aa765d61d8327deb882cf99 --authorized
 keris crack --hashes-file hashes.txt --wordlist rockyou.txt --authorized
 ```
 
-Pure local computation — no network traffic. Output is JSON-friendly for
+Pure local computation, no network traffic. Output is JSON-friendly for
 feeding back into a report.
 
 ### SSRF detection & exploitation (`--ssrf` / `--ssrf-exploit`)
 
 Proves SSRF **out-of-band**: keris spins up a local callback listener, injects
 its URL into every discovered query parameter, and waits. If the server makes a
-request back, SSRF is confirmed (CRITICAL) — even when the response is
+request back, SSRF is confirmed (CRITICAL), even when the response is
 sanitized. Once confirmed, `--ssrf-exploit` weaponizes it:
 
-- **Cloud metadata theft** — pulls AWS IAM credentials / GCP / Azure metadata
+- **Cloud metadata theft**: pulls AWS IAM credentials / GCP / Azure metadata
   through the vulnerable parameter (`169.254.169.254`, `metadata.google.internal`).
-- **Internal port scan** — probes 15 common internal services on `localhost`
+- **Internal port scan**: probes 15 common internal services on `localhost`
   (MySQL, PostgreSQL, Redis, MongoDB, Elasticsearch, Docker, Kubernetes, …)
   and reports which ones answer.
 
@@ -568,10 +568,10 @@ target is already blocking payloads.
 
 Takes any JWT found during the scan and attacks it (authorized only):
 
-- **weak HMAC secret brute** — ~100 common secrets + suffix variants
-- **alg=none** — forge a token with no signature
-- **RS → HS confusion** — sign with the public key when detected
-- **expired token replay** — replay an already-expired token
+- **weak HMAC secret brute**: ~100 common secrets + suffix variants
+- **alg=none**: forge a token with no signature
+- **RS → HS confusion**: sign with the public key when detected
+- **expired token replay**: replay an already-expired token
 
 Every successful exploit is **proven** by sending the forged token to the
 target and reporting the accepting endpoint.
@@ -583,7 +583,7 @@ keris scan https://example.com --authorized --jwt-attack
 ### Auto-auth chain (`--auth-chain`)
 
 After logging in with valid credentials, scans the **post-login attack
-surface** — `/dashboard`, `/admin`, `/account`, API endpoints — for broken
+surface**: `/dashboard`, `/admin`, `/account`, API endpoints, for broken
 access control and leaked sensitive data:
 
 ```bash
@@ -594,7 +594,7 @@ keris scan https://example.com --authorized --auth-chain \
 ### Risk score (A-F)
 
 Every report ends with a single-letter risk grade (`A` best → `F` critical)
-computed from the severity mix, plus a 0–100 score and a plain-language
+computed from the severity mix, plus a 0 to 100 score and a plain-language
 recommendation.
 
 ### Race condition / TOCTOU (`--race`)
@@ -661,7 +661,7 @@ keris subdomain example.com --no-crt --wordlist my-subs.txt --workers 40
 
 ### Remediation plan
 
-Every markdown report ends with a prioritized **remediation plan** — per
+Every markdown report ends with a prioritized **remediation plan**: per
 finding, concrete fix steps grouped by severity, so the report isn't just a
 list of problems but an action plan for the dev team.
 
@@ -700,7 +700,7 @@ keris scan https://example.com --authorized --exploit-cve
 ## Authentication
 
 Bearer token, session cookie, basic auth, or full HTML form auto-login (the
-session is captured and reused across **every** subcommand — `scan`, `recon`,
+session is captured and reused across **every** subcommand: `scan`, `recon`,
 `discover`, `hunt`, `fuzz`, and more):
 
 ```bash
@@ -730,7 +730,7 @@ Also available:
   (each finding rendered as a node, ending at the final impact).
 - **Retest**: `keris retest jan.json feb.json -o retest.md` groups findings
   into fixed / new / persisting and prints a remediation progress percentage.
-  Non-zero exit when anything remains — usable as a "has the fix landed?" CI
+  Non-zero exit when anything remains, usable as a "has the fix landed?" CI
   gate.
 - **Live retest (auto re-verify)**: `keris retest jan.json --live
   --authorized` re-scans the target from the old JSON, re-verifies each finding,
@@ -882,7 +882,7 @@ Overpowered kit modules (v0.10.0), all running with `--authorized`:
 
 ---
 
-[MIT](LICENSE) — use it, learn from it, improve it. Contributions welcome; see
+[MIT](LICENSE), use it, learn from it, improve it. Contributions welcome; see
 [CONTRIBUTING.md](CONTRIBUTING.md). Found a security hole in Keris itself?
 Report it via [SECURITY.md](SECURITY.md).
 
