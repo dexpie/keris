@@ -766,7 +766,9 @@ def _cmd_backdoor(args, cfg, overrides) -> int:
 
 def _cmd_agent(args, cfg, overrides) -> int:
     from keris.agent import AGENT_REPORT, run_agent
+    from keris.core.logger import brutal_warning
 
+    brutal_warning("AI AGENT")
     if not args.goal:
         error("Agent membutuhkan --goal, mis. --goal \"Ambil alih server example.com\"")
         return EXIT_ERROR

@@ -39,7 +39,8 @@ wordlists, credential validation against a live login, credential hunting
 - A red warning banner is printed before every aggressive mode (`--pwn`,
   `--exploit`, `--brute-extended`, `dos --hammer`, `hunt --verify`,
   `credcheck`, `exploit`, `shell`, `pivot`, `rebind`, `gitdump`,
-  `authbypass`, `spray`, `dbdump`, `cloud`, `xsshook`, `k8s`, `crack`). It
+  `authbypass`, `spray`, `dbdump`, `cloud`, `xsshook`, `k8s`, `crack`,
+  `scan --pivot-auto`, `agent`, `farm worker`, `enterprise`). It
   is a reminder that all risk stays with you.
 - Never use this for cybercrime. Legality and responsibility sit with the
   operator, not the tool.
@@ -158,6 +159,10 @@ never expose it publicly.
 | `crack` | Offline hash cracking: MD5/SHA1/SHA256/NTLM/MD5-Crypt via wordlist or short brute (authorized only) |
 | `plugins` / `init` | Your own custom checks; generate an example `keris.json` |
 | `scan --templates` | Template/rule engine: YAML detections (`.env`, `.git`, backups, phpinfo, Actuator, directory listing, Swagger) with AND/OR matchers |
+| `scan --pivot-auto` | After an SSRF/RCE is found, auto-pivot: detect internal interfaces, scan the internal network, try default creds (socks5/ssh/chisel; authorized only) |
+| `agent` | AI pentesting agent: plan + execute a goal step-by-step, with checkpoint/resume and a full Markdown report |
+| `farm` | Distributed scanning cluster: master/worker nodes share scan jobs over HTTP (register, claim, submit, unified report) |
+| `enterprise` | `keris-enterprise`: REST API + RBAC users, projects, cron scheduler, alerting (Slack/Teams/email + escalation), DefectDojo/GitHub/GitLab/Splunk integrations, and a web dashboard |
 
 Every full scan includes by default: SQLi, XSS, SSRF, IDOR, rate-limit,
 directory listing, auth bypass, CORS, open redirect, cookie flags, TLS,
@@ -189,6 +194,79 @@ Examples it detects:
 Chained findings carry a `"chain"` marker and `"source": "correlation"` in the
 JSON output, so they're easy to tell apart from raw findings. The Markdown and
 HTML reports render them as a visual **Attack Paths** section.
+
+### Automatic pivoting (`--pivot-auto`)
+
+When a scan confirms an SSRF (or command execution) finding, Keris can pivot
+into the internal network by itself:
+
+```bash
+keris scan https://example.com --pivot-auto --authorized
+# optional: --internal-scan-depth 2 --pivot-method socks5|ssh|chisel
+```
+
+1. Detects the target's internal network interfaces and CIDR ranges.
+2. Scans the internal network for reachable hosts and services.
+3. Tries default credentials on any admin panels/services it finds.
+4. Keeps the SOCKS5 proxy alive so you can continue through the tunnel.
+
+`--pivot-auto` is gated behind `--authorized` and shows the warning banner.
+
+### AI pentesting agent (`agent`)
+
+An autonomous agent that plans and executes a security goal step by step,
+keeping full state so it can resume later:
+
+```bash
+keris agent "Get a shell on the server" https://example.com --authorized --verbose
+keris agent --goal "..." --resume              # continue from a checkpoint
+```
+
+- Planner is LLM-driven (`KERIS_LLM_API_KEY`, OpenAI-compatible) with a
+  rule-based fallback when no key is set.
+- Writes `agent-report.md` (full log of every step) and `agent-state.json`
+  (checkpoint for resume).
+- Without `--authorized` the agent only runs non-destructive steps.
+
+### Distributed scanning farm (`farm`)
+
+Scale scans across machines: a master node hands out targets to worker nodes
+over a small HTTP protocol:
+
+```bash
+keris farm master --port 8080                     # coordinator
+keris farm worker --master http://localhost:8080 --capacity 3   # on each box
+keris farm submit --targets targets.txt           # enqueue jobs
+keris farm status                                 # live queue/report
+```
+
+- Workers register, claim jobs, run `keris scan`, and submit results back.
+- The master aggregates a single `farm-report.md` and reassigns jobs from
+  failed workers automatically.
+- Auth via HMAC-signed tokens (`KERIS_FARM_SECRET` or `farm-secret.txt`).
+
+### Enterprise suite (`enterprise`)
+
+`keris-enterprise` layers a management plane over the scanner: users with
+roles, projects, scheduled scanning, alerting, and third-party integrations:
+
+```bash
+keris enterprise setup --admin-email admin@company.com
+keris enterprise start --port 9000 --authorized   # REST API + scheduler + dashboard
+keris enterprise status
+# or: python -m keris_enterprise start
+```
+
+- **REST API**: login, users (admin/pentester/viewer RBAC), projects, on-demand
+  scans, scan history, remediation tracking, dashboard, scheduler control.
+- **Scheduler**: per-project cron schedule (`daily`, `weekly`, `*/5m`, ...)
+  runs scans automatically and stores results.
+- **Alerts**: Slack, Microsoft Teams, SMTP email, generic webhook; escalation
+  level rises when CRITICAL findings repeat.
+- **Integrations**: DefectDojo import, Splunk HEC / ELK log forwarding,
+  GitHub / GitLab auto-tickets.
+- **Web UI**: self-contained HTML dashboard with risk trend, attack path
+  visualization, and remediation progress. Zero runtime deps (stdlib only).
 
 ### Smart wordlists (per-stack)
 
@@ -807,13 +885,16 @@ uploads the full report as an artifact.
 ```
 keris/
 ├── keris/
-│   ├── __main__.py        # CLI (36 subcommands)
+│   ├── __main__.py        # CLI (57 subcommands)
 │   ├── payloads.py        # SQLi/XSS/SSRF/CMDI/SSTI payloads + wordlists
 │   ├── cvss.py            # CVSS v3.1 scoring + OWASP mapping
 │   ├── report*.py         # Markdown / HTML / PDF / dashboard
 │   ├── ui.py              # local web UI (stdlib http.server, zero deps)
+│   ├── agent.py           # AI pentesting agent (plan/execute/resume)
+│   ├── farm/              # distributed scan cluster (master/worker/client)
 │   ├── core/              # http client (auth, proxy, backoff), config, logger, utils
-│   └── modules/           # scanners + correlation, triage, browser, ticketing, watch, tui
+│   └── modules/           # scanners + correlation, triage, browser, ticketing, watch, tui, pivot-auto
+├── keris_enterprise/      # enterprise suite: REST API, RBAC, scheduler, alerts, web UI
 ├── plugins/               # example plugins (Python + JSON)
 ├── tests/                 # pytest suite + intentionally-vulnerable demo server
 ├── Dockerfile
@@ -849,6 +930,11 @@ keris/
 - [x] **OOB SSRF detection (`--ssrf`)**
 - [x] **SSRF exploitation: cloud metadata theft + internal port scan**
 - [x] **WAF detection & fingerprinting (`waf`)**
+- [x] **Attack path generator with criticality scoring (`--chain --path-depth`, `--dot-output`)**
+- [x] **Automatic internal pivoting after SSRF/RCE (`--pivot-auto`)**
+- [x] **AI pentesting agent (`agent`)**
+- [x] **Distributed scanning cluster (`farm`)**
+- [x] **Enterprise suite (`enterprise`): RBAC, scheduler, alerts, integrations, web UI**
 
 ## Legal note
 
