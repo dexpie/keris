@@ -132,6 +132,12 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Jenis exploit (default: sqli,cmdi,ssti,xss)")
     ps.add_argument("--exploit-kit", action="store_true",
                     help="Jalankan exploit kit (SQLi dump, LFI/RFI, upload bypass, XXE, RCE) (butuh --authorized)")
+    ps.add_argument("--pivot-auto", action="store_true",
+                    help="Auto-pivot setelah exploit: detect interface internal, scan network, coba default creds (butuh --authorized)")
+    ps.add_argument("--internal-scan-depth", type=int, default=2,
+                    help="Seberapa dalam jaringan internal di-scan saat pivot-auto (default: 2)")
+    ps.add_argument("--pivot-method", choices=["socks5", "ssh", "chisel"], default="socks5",
+                    help="Metode pivot untuk --pivot-auto (default: socks5)")
     ps.add_argument("--brute-extended", action="store_true",
                     help="Brute-force login dengan wordlist extended (butuh --authorized)")
     ps.add_argument("--username-enum", action="store_true",
@@ -661,6 +667,57 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pbd.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1")
 
+    # agent (AI pentesting agent)
+    pag = sub.add_parser("agent", parents=[common],
+                         help="AI Pentesting Agent: pecah goal jadi langkah, jalankan modul keris otomatis (LLM: KERIS_LLM_API_KEY)")
+    pag.add_argument("--goal", default="",
+                     help="Goal agent, mis. \"Dapatkan akses shell ke server\"")
+    pag.add_argument("--max-steps", type=int, default=10,
+                     help="Batas maksimum langkah yang dieksekusi (default: 10)")
+    pag.add_argument("--verbose", action="store_true",
+                     help="Tampilkan reasoning agent tiap langkah")
+    pag.add_argument("--resume", action="store_true",
+                     help="Lanjutkan dari checkpoint agent-state.json")
+    pag.add_argument("--state-file", default="agent-state.json",
+                     help="File checkpoint state (default: agent-state.json)")
+    pag.add_argument("--report", default="agent-report.md",
+                     help="File laporan agent (default: agent-report.md)")
+    pag.add_argument("--json-output", help="File output JSON ringkasan agent")
+
+    # farm (distributed scanning cluster)
+    pfarm = sub.add_parser("farm", help="Distributed scan cluster: master/worker/submit/status/stop")
+    pfarm.add_argument("farm_cmd", choices=["master", "worker", "submit", "status", "stop"],
+                       help="Perintah farm")
+    pfarm.add_argument("--master", default="http://localhost:8080",
+                       help="URL master (default: http://localhost:8080)")
+    pfarm.add_argument("--host", default="0.0.0.0", help="Bind host master")
+    pfarm.add_argument("--port", type=int, default=8080, help="Port master")
+    pfarm.add_argument("--capacity", type=int, default=1,
+                       help="Kapasitas job worker (default: 1)")
+    pfarm.add_argument("--workers", type=int, default=1,
+                       help="Jumlah worker yang diharapkan (info saja)")
+    pfarm.add_argument("--name", default="worker", help="Nama worker")
+    pfarm.add_argument("--targets", help="File daftar target (satu per baris) untuk submit")
+    pfarm.add_argument("--config", help="File JSON config scan untuk submit")
+    pfarm.add_argument("--db", default="", help="Path SQLite master")
+    pfarm.add_argument("--report-dir", default="", help="Direktori report master")
+    pfarm.add_argument("--poll", type=float, default=5.0, help="Interval poll worker (detik)")
+    pfarm.add_argument("--iterations", type=int, default=0,
+                       help="Maksimum job diproses worker (0 = tanpa batas)")
+    pfarm.add_argument("--admin-token", default="", help="Token admin untuk stop")
+    pfarm.add_argument("--json-output", help="File output JSON (status)")
+
+    # enterprise (full enterprise suite)
+    pent = sub.add_parser("enterprise", help="keris-enterprise: server REST + RBAC + scheduler + alerting + dashboard")
+    pent.add_argument("ent_cmd", choices=["setup", "start", "status", "stop"],
+                      help="Perintah enterprise")
+    pent.add_argument("--host", default="0.0.0.0", help="Bind host server")
+    pent.add_argument("--port", type=int, default=9000, help="Port server")
+    pent.add_argument("--db", default="", help="Path SQLite (default: keris-enterprise.db)")
+    pent.add_argument("--admin-user", default="admin", help="Username admin")
+    pent.add_argument("--admin-password", default="admin123", help="Password admin")
+    pent.add_argument("--admin-email", default="", help="Email admin")
+
     return p.parse_args(argv)
 
 
@@ -1131,6 +1188,46 @@ def _run_scan_single(base: str, args, cfg: KerisConfig, overrides: dict, client:
                     warn(f"SSRF exploit gagal: {e}")
         except Exception as e:
             warn(f"SSRF probe gagal: {e}")
+
+    # pivot-auto: scan internal + default creds setelah exploit berhasil
+    if getattr(args, "pivot_auto", False):
+        info("=== PIVOT-AUTO ===")
+        from keris.modules.pivot_auto import run_pivot_auto
+        import re as _piv_re
+
+        try:
+            # kandidat RCE dari temuan CMDI (endpoint + param di detail)
+            rce_candidates = []
+            for f in findings:
+                if "Command Injection" in str(f.get("title", "")):
+                    ep = f.get("endpoint", "")
+                    m = _piv_re.search(r"Parameter `([^`]+)`", str(f.get("detail", "")))
+                    if ep and m:
+                        rce_candidates.append((ep, m.group(1)))
+            # kandidat SSRF dari temuan SSRF
+            ssrf_url = ""
+            ssrf_param = ""
+            for f in findings:
+                if "SSRF" in str(f.get("title", "")).upper():
+                    ssrf_url = f.get("vuln_url") or f.get("endpoint", "")
+                    ssrf_param = f.get("vuln_param", "")
+                    if ssrf_url and ssrf_param:
+                        break
+            res = run_pivot_auto(
+                base, client,
+                rce_candidates=rce_candidates,
+                ssrf_url=ssrf_url, ssrf_param=ssrf_param,
+                internal_scan_depth=getattr(args, "internal_scan_depth", 2),
+                pivot_method=getattr(args, "pivot_method", "socks5"),
+                authorized=authorized,
+                yes=bool(getattr(args, "yes", False)),
+            )
+            findings.extend(res.get("findings", []))
+            if res.get("services"):
+                from keris.modules.pivot_auto import PIVOT_LOG
+                info(f"Aktivitas pivot dicatat di: {PIVOT_LOG}")
+        except Exception as e:
+            warn(f"Pivot-auto gagal: {e}")
 
     # WAF detection (opsional): fingerprint WAF di awal
     # (deteksi WAF sudah dijalankan di bagian atas _run_scan_single; ini duplikat)

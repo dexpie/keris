@@ -764,3 +764,122 @@ def _cmd_backdoor(args, cfg, overrides) -> int:
     return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
 
 
+def _cmd_agent(args, cfg, overrides) -> int:
+    from keris.agent import AGENT_REPORT, run_agent
+
+    if not args.goal:
+        error("Agent membutuhkan --goal, mis. --goal \"Ambil alih server example.com\"")
+        return EXIT_ERROR
+    targets = _resolve_targets(args)
+    target = normalize_url(targets[0]) if targets else ""
+    if not target:
+        error("Agent membutuhkan target URL.")
+        return EXIT_ERROR
+    summary = run_agent(
+        args.goal, target,
+        max_steps=getattr(args, "max_steps", 10),
+        verbose=bool(getattr(args, "verbose", False)),
+        authorized=bool(getattr(args, "authorized", False)),
+        resume=bool(getattr(args, "resume", False)),
+        state_file=getattr(args, "state_file", "agent-state.json"),
+        report_file=getattr(args, "report", AGENT_REPORT),
+    )
+    ok(f"Agent selesai: {summary['steps_executed']} langkah, "
+       f"{summary['successes']} berhasil, {summary['total_findings']} temuan")
+    if getattr(args, "json_output", None):
+        _ensure_parent(args.json_output)
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
+def _cmd_farm(args, cfg, overrides) -> int:
+    from keris.farm import (MasterServer, WorkerLoop, farm_status, farm_stop,
+                            submit_jobs)
+    from keris.farm.client import read_config, read_targets
+
+    cmd = args.farm_cmd
+    if cmd == "master":
+        srv = MasterServer(host=args.host, port=args.port, db_path=args.db,
+                           report_dir=args.report_dir)
+        srv.run_forever()
+        return EXIT_OK
+    if cmd == "worker":
+        from keris.core.logger import brutal_warning
+
+        brutal_warning("FARM WORKER")
+        w = WorkerLoop(args.master, name=args.name, capacity=args.capacity,
+                       poll_interval=args.poll, authorized=bool(getattr(args, "authorized", False)))
+        done = w.run_forever(iterations=args.iterations)
+        ok(f"Worker selesai: {done} job diproses")
+        return EXIT_OK
+    if cmd == "submit":
+        if not args.targets:
+            error("farm submit membutuhkan --targets <file>")
+            return EXIT_ERROR
+        targets = read_targets(args.targets)
+        config = read_config(args.config) if args.config else {}
+        res = submit_jobs(args.master, targets, config)
+        ok(f"{len(res.get('job_ids', []))} job disubmit ke {args.master}")
+        return EXIT_OK
+    if cmd == "status":
+        st = farm_status(args.master)
+        ok(f"Farm {args.master}: {st['workers']} worker, "
+           f"{st['jobs']} job ({st['done']} done, {st['pending']} pending)")
+        if getattr(args, "json_output", None):
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump(st, f, indent=2, default=str)
+        return EXIT_OK
+    if cmd == "stop":
+        ok_stop = farm_stop(args.master, args.admin_token)
+        if ok_stop:
+            ok("Master diminta berhenti")
+            return EXIT_OK
+        error("Gagal menghentikan master (periksa token/URL)")
+        return EXIT_ERROR
+    return EXIT_ERROR
+
+
+def _cmd_enterprise(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+
+    brutal_warning("ENTERPRISE")
+    from keris_enterprise import EnterpriseServer
+
+    if args.ent_cmd == "setup":
+        srv = EnterpriseServer(host="127.0.0.1", port=0, db_path=args.db)
+        srv.users.create_user(args.admin_user, args.admin_password,
+                              role="admin", email=args.admin_email)
+        srv.db.close()
+        ok(f"Admin dibuat: {args.admin_user} (role=admin). DB: {args.db or 'keris-enterprise.db'}")
+        return EXIT_OK
+    if args.ent_cmd == "start":
+        srv = EnterpriseServer(host=args.host, port=args.port, db_path=args.db,
+                               authorized=bool(getattr(args, "authorized", False)))
+        try:
+            srv.users.create_user(args.admin_user, args.admin_password,
+                                  role="admin", email=args.admin_email)
+        except Exception:
+            warn("Admin sudah ada; lewati pembuatan user.")
+        srv.scheduler.start()
+        ok("Scheduler aktif.")
+        srv.run_forever()
+        return EXIT_OK
+    if args.ent_cmd == "status":
+        import json as _json
+
+        srv = EnterpriseServer(host="127.0.0.1", port=0, db_path=args.db)
+        dash = srv.dashboard()
+        srv.db.close()
+        ok(f"Project: {dash['projects']} | Hasil: {dash['recent_results']} | "
+           f"Temuan: {dash['total_findings']} | Remediasi open: "
+           f"{dash['remediations_open']}")
+        return EXIT_OK
+    if args.ent_cmd == "stop":
+        warn("keris-enterprise adalah server foreground; hentikan dengan Ctrl+C "
+             "di terminal tempat server berjalan.")
+        return EXIT_OK
+    return EXIT_ERROR
+
+

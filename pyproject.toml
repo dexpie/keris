@@ -45,9 +45,10 @@ Repository = "https://github.com/dexpie/keris"
 
 [project.scripts]
 keris = "keris.__main__:main"
+keris-enterprise = "keris_enterprise.__main__:main"
 
 [tool.setuptools]
-packages = ["keris", "keris.core", "keris.modules", "keris.cli"]
+packages = ["keris", "keris.core", "keris.modules", "keris.cli", "keris.farm", "keris_enterprise"]
 
 [tool.setuptools.package-data]
 keris = ["data/*.txt", "data/templates/*.yaml", "data/templates/*.yml"]
