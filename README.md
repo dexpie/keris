@@ -136,6 +136,7 @@ never expose it publicly.
 | `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (incl. password-reset poisoning), WebSocket auth & Origin checks |
 | `toolbox` | Offline utility kit: encode/decode, hashing + crack, payload generator (SQLi/XSS/LFI/SSRF/cmd) with mutations, reverse shells, wordlists, port scan, DNS check, JWT decode/analyze, gzip/zlib |
 | `sast` | Client-side static analysis: source/JS bundle sinks + secrets, dependency CVE DB, CycloneDX SBOM |
+| `watch` | Continuous monitoring: scan terjadwal + diff + risk trend + alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/generic webhook) |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -442,6 +443,30 @@ keris toolbox --tool list                                  # all tools
 
 Payloads cover SQLi, XSS, LFI/path traversal, SSRF, and command injection;
 `--mutation` expands a payload with encoding/case/comment variants.
+
+### Continuous monitoring (`watch`)
+
+Jalankan scan terjadwal, diff hasil antar cycle, pantau risk trend, dan alert:
+
+```bash
+keris watch https://app.example.com --interval 3600 --state-dir .keris-watch \
+  --webhook https://hooks.slack.com/xxx --webhook-type slack \
+  --webhook https://outlook.office.com/webhook/xxx --webhook-type teams \
+  --smtp-host smtp.gmail.com --smtp-user a@x.com --smtp-pass x --smtp-to ops@x.com \
+  --pagerduty-key rk123 --min-severity HIGH --json-output cycle.json
+```
+
+- **Scheduled scans**: `--interval` (detik) antar cycle, `--runs` membatasi jumlah
+  cycle (default: terus menerus sampai Ctrl+C). Cocok untuk cron.
+- **Diff**: tiap cycle membandingkan dengan `latest.json` sebelumnya dan
+  melaporkan temuan *baru* / *fixed* / *persisting*.
+- **Risk trend**: skor risiko (A–F, 0–100) dari `riskscore` dicatat tiap cycle
+  ke `state_dir/trend.json`; output menampilkan 10 cycle terakhir supaya
+  tren perbaikan/regresi terlihat.
+- **Multi-channel alert**: notifikasi hanya untuk temuan *baru* yang mencapai
+  `--min-severity`; kanal bisa banyak sekaligus — Slack, Discord, Telegram,
+  Microsoft Teams, email SMTP (STARTTLS/SSL), PagerDuty Events API v2, atau
+  generic JSON webhook. Tanpa `--webhook-type`, jenis dideteksi dari URL.
 
 ### Client-side SAST (`sast`)
 
@@ -1041,6 +1066,7 @@ keris/
 - [x] **Advanced hunt: 50+ secret patterns, `--deep` paths, `--types` filter, `--from-scan`**
 - [x] **Offline toolbox (`toolbox`): encode/decode, hash/crack, payloads, shells, wordlists, ports, dns, jwt**
 - [x] **Client-side SAST (`sast`): source analyzer, dependency CVE DB, CycloneDX SBOM**
+- [x] **Continuous monitoring (`watch`): scheduled scans, diff, risk trend, alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/webhook)**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**

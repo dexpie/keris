@@ -446,18 +446,32 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
 
     # watch (continuous monitoring)
     pwa = sub.add_parser("watch", parents=[common],
-                         help="Continuous monitoring: scan terjadwal + diff + alert")
+                         help="Continuous monitoring: scan terjadwal + diff + risk trend + alert")
     pwa.add_argument("--interval", type=int, default=3600,
                      help="Interval antar scan (detik, default 3600)")
     pwa.add_argument("--runs", type=int, default=None,
                      help="Jumlah cycle (default: terus menerus sampai Ctrl+C)")
     pwa.add_argument("--state-dir", default=".keris-watch",
                      help="Direktori state untuk menyimpan hasil scan sebelumnya")
-    pwa.add_argument("--webhook", help="Webhook Slack/Discord/Telegram untuk alert temuan baru")
-    pwa.add_argument("--webhook-type", choices=["auto", "slack", "discord", "telegram"], default="auto")
+    pwa.add_argument("--webhook", action="append", default=[],
+                     help="Webhook untuk alert temuan baru (bisa diulang: Slack/Discord/"
+                          "Telegram/Teams/email SMTP/PagerDuty/generic)")
+    pwa.add_argument("--webhook-type", action="append", default=[],
+                     help="Jenis webhook per --webhook (slack|discord|telegram|teams|email|"
+                          "pagerduty|webhook|auto). Default auto. Pasangannya --webhook "
+                          "urutan yang sama; satu nilai berlaku untuk semua.")
     pwa.add_argument("--min-severity", default="HIGH", choices=["CRITICAL", "HIGH", "MEDIUM", "LOW"],
                      help="Severity minimum untuk alert (default: HIGH)")
     pwa.add_argument("--json-output", help="File output JSON hasil cycle terakhir")
+    pwa.add_argument("--smtp-host", default="", help="Host SMTP untuk alert email")
+    pwa.add_argument("--smtp-port", type=int, default=587, help="Port SMTP (default 587, 465=SSL)")
+    pwa.add_argument("--smtp-user", default="", help="User SMTP (opsional)")
+    pwa.add_argument("--smtp-pass", default="", help="Password SMTP (opsional)")
+    pwa.add_argument("--smtp-to", default=[], help="Penerima email alert (bisa diulang)",
+                     action="append")
+    pwa.add_argument("--pagerduty-key", default="", help="Routing key PagerDuty Events API v2")
+    pwa.add_argument("--trend", action="store_true",
+                     help="Tampilkan ringkasan risk trend dari cycle sebelumnya")
 
     # tui (terminal interactive)
     ptu = sub.add_parser("tui", help="Terminal UI interaktif: scan + progress + hasil")

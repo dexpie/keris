@@ -98,6 +98,28 @@ def _cmd_watch(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     state_dir = args.state_dir
 
+    # bangun daftar kanal alert (webhook + email SMTP + pagerduty)
+    channels = []
+    webhooks = list(getattr(args, "webhook", []) or [])
+    types = list(getattr(args, "webhook_type", []) or [])
+    if len(types) == 1:
+        types = types * len(webhooks)
+    for i, url in enumerate(webhooks):
+        kind = types[i] if i < len(types) else "auto"
+        channels.append({"url": url, "kind": kind or "auto"})
+    smtp_to = ",".join(getattr(args, "smtp_to", []) or [])
+    if getattr(args, "smtp_host", "") and smtp_to:
+        channels.append({
+            "kind": "email",
+            "smtp_host": args.smtp_host,
+            "smtp_port": getattr(args, "smtp_port", 587),
+            "smtp_user": getattr(args, "smtp_user", ""),
+            "smtp_pass": getattr(args, "smtp_pass", ""),
+            "smtp_to": smtp_to,
+        })
+    if getattr(args, "pagerduty_key", ""):
+        channels.append({"url": args.pagerduty_key, "kind": "pagerduty"})
+
     def run_scan(target: str, out_path: str) -> str:
         # Jalankan scan sebagai subproses dengan output JSON
         import subprocess
@@ -111,6 +133,8 @@ def _cmd_watch(args, cfg, overrides) -> int:
             warn(f"Scan subprocess rc={r.returncode}: {r.stderr[-300:]}")
         return out_path
 
+    webhook_arg = webhooks[0] if webhooks else None
+    webhook_type = types[0] if types else "auto"
     alert_count = 0
     for target in targets:
         info(f"Watch target: {target}")
@@ -119,10 +143,11 @@ def _cmd_watch(args, cfg, overrides) -> int:
             run_scan=run_scan,
             interval=args.interval,
             runs=args.runs,
-            webhook=args.webhook,
-            webhook_type=args.webhook_type,
+            webhook=webhook_arg,
+            webhook_type=webhook_type,
             min_severity=args.min_severity,
             json_output=args.json_output,
+            channels=channels or None,
         )
     if alert_count:
         warn(f"Total cycle dengan temuan alertable: {alert_count}")
