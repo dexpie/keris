@@ -1,14 +1,64 @@
 services:
+  # Web UI & API server keris-enterprise (multi-tenant, RBAC, worker/scheduler)
+  enterprise-api:
+    build: .
+    image: keris:latest
+    container_name: keris-enterprise-api
+    entrypoint: ["keris-enterprise"]
+    command: ["start", "--host", "0.0.0.0", "--port", "9000", "--db", "/data/keris-enterprise.db"]
+    environment:
+      KERIS_AUTHORIZED: "false"
+    ports:
+      - "9000:9000"
+    volumes:
+      - keris_data:/data
+      - keris_work:/work
+    restart: unless-stopped
+
+  # Worker: memproses antrean scan di background
+  enterprise-worker:
+    build: .
+    image: keris:latest
+    container_name: keris-enterprise-worker
+    entrypoint: ["keris-enterprise"]
+    command: ["worker", "--host", "0.0.0.0", "--port", "9000", "--db", "/data/keris-enterprise.db"]
+    environment:
+      KERIS_AUTHORIZED: "false"
+    volumes:
+      - keris_data:/data
+      - keris_work:/work
+    depends_on:
+      - enterprise-api
+    restart: unless-stopped
+
+  # Scheduler: scan terjadwal per project
+  enterprise-scheduler:
+    build: .
+    image: keris:latest
+    container_name: keris-enterprise-scheduler
+    entrypoint: ["keris-enterprise"]
+    command: ["scheduler", "--host", "0.0.0.0", "--port", "9000", "--db", "/data/keris-enterprise.db"]
+    environment:
+      KERIS_AUTHORIZED: "false"
+    volumes:
+      - keris_data:/data
+      - keris_work:/work
+    depends_on:
+      - enterprise-api
+    restart: unless-stopped
+
+  # CLI langsung: docker compose run --rm keris scan https://example.com
   keris:
     build: .
     image: keris:latest
     entrypoint: ["keris"]
-    # contoh penggunaan:
-    #   docker compose run --rm keris scan https://example.com
     working_dir: /work
+    profiles: ["cli"]
     volumes:
       - .:/work
       - keris_cache:/home/keris/.cache
 
 volumes:
+  keris_data:
+  keris_work:
   keris_cache:

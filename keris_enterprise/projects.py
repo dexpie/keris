@@ -23,6 +23,7 @@ class ProjectStore:
                 client TEXT,
                 targets TEXT,
                 schedule TEXT,
+                org_id TEXT,
                 created_at REAL
             )
         """)
@@ -32,6 +33,7 @@ class ProjectStore:
                 project_id TEXT,
                 target TEXT,
                 result TEXT,
+                status TEXT,
                 created_at REAL
             )
         """)
@@ -49,16 +51,22 @@ class ProjectStore:
     # --- projects ---
     def create_project(self, name: str, client: str = "",
                        targets: Optional[List[str]] = None,
-                       schedule: str = "") -> Optional[Dict]:
+                       schedule: str = "", org_id: str = "") -> Optional[Dict]:
         pid = f"p-{secrets.token_hex(4)}"
         self.db.execute(
-            "INSERT INTO projects(id,name,client,targets,schedule,created_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (pid, name, client, json.dumps(targets or []), schedule, time.time()))
+            "INSERT INTO projects(id,name,client,targets,schedule,created_at,org_id) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (pid, name, client, json.dumps(targets or []), schedule, time.time(),
+             org_id))
         return self.get_project(pid)
 
-    def list_projects(self) -> List[Dict]:
-        rows = self.db.query("SELECT * FROM projects ORDER BY created_at DESC")
+    def list_projects(self, org_id: str = "") -> List[Dict]:
+        sql = "SELECT * FROM projects ORDER BY created_at DESC"
+        params: tuple = ()
+        if org_id:
+            sql = "SELECT * FROM projects WHERE org_id=? ORDER BY created_at DESC"
+            params = (org_id,)
+        rows = self.db.query(sql, params)
         for r in rows:
             r["targets"] = json.loads(r.get("targets") or "[]")
         return rows
@@ -94,14 +102,47 @@ class ProjectStore:
         return True
 
     # --- scan results ---
-    def save_result(self, project_id: str, target: str, result: Dict) -> Dict:
+    def save_result(self, project_id: str, target: str, result: Dict,
+                    status: str = "done") -> Dict:
         rid = f"s-{secrets.token_hex(4)}"
         self.db.execute(
-            "INSERT INTO scan_results(id,project_id,target,result,created_at) "
-            "VALUES(?,?,?,?,?)",
+            "INSERT INTO scan_results(id,project_id,target,result,status,created_at) "
+            "VALUES(?,?,?,?,?,?)",
             (rid, project_id, target, json.dumps(result, default=str),
-             time.time()))
-        return {"id": rid, "project_id": project_id, "target": target}
+             status, time.time()))
+        return {"id": rid, "project_id": project_id, "target": target,
+                "status": status}
+
+    def get_result(self, rid: str) -> Optional[Dict]:
+        rows = self.db.query("SELECT * FROM scan_results WHERE id=?", (rid,))
+        if not rows:
+            return None
+        r = rows[0]
+        try:
+            r["result"] = json.loads(r.get("result") or "{}")
+        except json.JSONDecodeError:
+            r["result"] = {}
+        return r
+
+    def delete_result(self, rid: str) -> bool:
+        self.db.execute("DELETE FROM scan_results WHERE id=?", (rid,))
+        return True
+
+    def update_result_status(self, rid: str, status: str) -> bool:
+        self.db.execute("UPDATE scan_results SET status=? WHERE id=?",
+                        (status, rid))
+        return True
+
+    def pending_results(self) -> List[Dict]:
+        rows = self.db.query(
+            "SELECT * FROM scan_results WHERE status IN ('queued','running') "
+            "ORDER BY created_at")
+        for r in rows:
+            try:
+                r["result"] = json.loads(r.get("result") or "{}")
+            except json.JSONDecodeError:
+                r["result"] = {}
+        return rows
 
     def project_results(self, project_id: str) -> List[Dict]:
         rows = self.db.query(

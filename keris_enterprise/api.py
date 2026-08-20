@@ -1,14 +1,20 @@
-"""REST API keris-enterprise: auth, projects, scans, scheduler, alerts.
+"""REST API keris-enterprise: auth, orgs, RBAC, projects, scans, scheduler,
+worker, alerts.
 
 Server HTTP (stdlib) dengan endpoint:
 - POST /api/login                  -> token
 - GET  /api/users, POST /api/users, PATCH /api/users/<u>/role
+- GET  /api/rbac                   -> matriks izin per role
+- GET/POST /api/orgs, GET/PATCH/DELETE /api/orgs/<id>
+- POST /api/orgs/<id>/members
 - GET/POST /api/projects, GET/PATCH/DELETE /api/projects/<id>
-- POST /api/projects/<id>/scan     -> jalankan scan sekali
-- GET  /api/projects/<id>/results  -> riwayat scan
+- POST /api/projects/<id>/scan     -> jalankan scan sekali (sync)
+- POST /api/projects/<id>/scan/queue -> antrekan scan (async, worker)
+- GET  /api/projects/<id>/results, GET/DELETE /api/results/<rid>
 - GET  /api/projects/<id>/remediations, POST .../remediations
 - GET  /api/dashboard              -> ringkasan untuk web UI
 - POST /api/scheduler/start|stop
+- POST /api/worker/start|stop, GET /api/worker/status
 """
 
 import json
@@ -22,24 +28,31 @@ from keris.core.logger import info, ok, warn
 from keris_enterprise.alerts import AlertManager
 from keris_enterprise.auth import Role, UserStore
 from keris_enterprise.db import EnterpriseDB
+from keris_enterprise.orgs import OrgStore, rbac_matrix
 from keris_enterprise.projects import ProjectStore
 from keris_enterprise.scheduler import Scheduler
+from keris_enterprise.worker import ScanWorker
 
 
 class EnterpriseServer:
-    """Orkestrator REST API + scheduler + alert."""
+    """Orkestrator REST API + scheduler + worker + alert."""
 
     def __init__(self, host: str = "0.0.0.0", port: int = 9000,
                  db_path: str = "", secret: str = "",
-                 authorized: bool = False, runner=None, scan_runner=None):
+                 authorized: bool = False, runner=None, scan_runner=None,
+                 worker_concurrency: int = 1):
         self.host = host
         self.port = port
         self.db = EnterpriseDB(db_path)
         self.users = UserStore(self.db, secret=secret)
         self.projects = ProjectStore(self.db)
+        self.orgs = OrgStore(self.db)
         self.alerts = AlertManager()
         self.scheduler = Scheduler(self.projects, runner=runner,
                                    authorized=authorized)
+        self.worker = ScanWorker(self.projects, runner=runner,
+                                 authorized=authorized,
+                                 concurrency=worker_concurrency)
         self._scan_runner = scan_runner  # testing hook untuk scan manual
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -49,6 +62,17 @@ class EnterpriseServer:
     def _auth_user(self, token: str, min_level: int = 1) -> Optional[Dict]:
         return self.users.require(token, min_level)
 
+    def _effective_org(self, user: Dict) -> str:
+        """org user: token tidak membawa org_id, jadi cek membership org admin.
+        Untuk user tanpa keanggotaan org spesifik, kembali ke global ("")."""
+        try:
+            uid = user.get("sub", "")
+            rows = self.db.query(
+                "SELECT org_id FROM org_users WHERE username=?", (uid,))
+            return rows[0]["org_id"] if rows else ""
+        except Exception:
+            return ""
+
     def run_scan(self, project_id: str, target: str) -> Dict:
         proj = self.projects.get_project(project_id)
         if not proj:
@@ -57,7 +81,7 @@ class EnterpriseServer:
             result = self._scan_runner(proj, target)
         else:
             result = self.scheduler._subprocess_scan(target)
-        self.projects.save_result(project_id, target, result)
+        saved = self.projects.save_result(project_id, target, result)
         findings = result.get("findings", []) if isinstance(result, dict) else []
         # sync remediasi otomatis dari temuan
         for f in findings:
@@ -67,7 +91,7 @@ class EnterpriseServer:
                                                  f.get("title", ""),
                                                  status="open")
         return {"project_id": project_id, "target": target,
-                "findings": len(findings), "result": result}
+                "findings": len(findings), "result": result, "id": saved["id"]}
 
     def dashboard(self) -> Dict:
         projects = self.projects.list_projects()
@@ -150,6 +174,25 @@ class EnterpriseServer:
                         str(body.get("email", "")))
                     self._send(u, 201)
                     return
+                if path == "/api/orgs":
+                    payload = server.users.verify_token(self._token())
+                    if not payload or payload.get("role") != Role.ADMIN:
+                        self._send({"error": "forbidden"}, 403)
+                        return
+                    o = server.orgs.create_org(str(body.get("name", "")))
+                    self._send(o, 201)
+                    return
+                if path.startswith("/api/orgs/") and path.endswith("/members"):
+                    oid = path[len("/api/orgs/"):-len("/members")]
+                    payload = server.users.verify_token(self._token())
+                    if not payload or payload.get("role") != Role.ADMIN:
+                        self._send({"error": "forbidden"}, 403)
+                        return
+                    ok_ = server.orgs.add_member(
+                        oid, str(body.get("username", "")),
+                        str(body.get("role", Role.VIEWER)))
+                    self._send({"ok": ok_})
+                    return
                 user = server._auth_user(self._token(),
                                          min_level=Role.LEVEL[Role.PENTESTER])
                 if not user:
@@ -160,8 +203,22 @@ class EnterpriseServer:
                         str(body.get("name", "")),
                         str(body.get("client", "")),
                         body.get("targets") or [],
-                        str(body.get("schedule", "")))
+                        str(body.get("schedule", "")),
+                        org_id=str(body.get("org_id", "")))
                     self._send(p, 201)
+                    return
+                if path.startswith("/api/projects/") and path.endswith("/scan/queue"):
+                    pid = path[len("/api/projects/"):-len("/scan/queue")]
+                    target = str(body.get("target", ""))
+                    if not target:
+                        proj = server.projects.get_project(pid)
+                        targets = proj.get("targets", []) if proj else []
+                        target = targets[0] if targets else ""
+                    if not target:
+                        self._send({"error": "target kosong"}, 400)
+                        return
+                    meta = server.worker.enqueue(pid, target)
+                    self._send({"queued": True, "result": meta})
                     return
                 if path.startswith("/api/projects/") and path.endswith("/scan"):
                     pid = path[len("/api/projects/"):-len("/scan")]
@@ -192,12 +249,30 @@ class EnterpriseServer:
                     server.scheduler.stop()
                     self._send({"ok": True})
                     return
+                if path == "/api/worker/start":
+                    server.worker.start()
+                    self._send({"ok": True})
+                    return
+                if path == "/api/worker/stop":
+                    server.worker.stop()
+                    self._send({"ok": True})
+                    return
                 self._send({"error": "not found"}, 404)
 
             def do_GET(self):
                 path = self.path.split("?")[0]
                 if path == "/api/dashboard":
                     self._send(server.dashboard())
+                    return
+                if path == "/api/health":
+                    self._send({"ok": True})
+                    return
+                if path == "/api/rbac":
+                    payload = server.users.verify_token(self._token())
+                    if not payload:
+                        self._send({"error": "unauthorized"}, 401)
+                        return
+                    self._send({"matrix": rbac_matrix()})
                     return
                 user = server._auth_user(self._token())
                 if not user:
@@ -209,8 +284,30 @@ class EnterpriseServer:
                         return
                     self._send({"users": server.users.list_users()})
                     return
+                if path == "/api/orgs":
+                    if user["role"] != Role.ADMIN:
+                        self._send({"error": "forbidden"}, 403)
+                        return
+                    orgs = server.orgs.list_orgs()
+                    for o in orgs:
+                        o["members"] = server.orgs.list_members(o["id"])
+                    self._send({"orgs": orgs})
+                    return
+                if path.startswith("/api/orgs/") and path.endswith("/members"):
+                    oid = path[len("/api/orgs/"):-len("/members")]
+                    if user["role"] != Role.ADMIN:
+                        self._send({"error": "forbidden"}, 403)
+                        return
+                    self._send({"members": server.orgs.list_members(oid)})
+                    return
                 if path == "/api/projects":
-                    self._send({"projects": server.projects.list_projects()})
+                    org_id = server._effective_org(user)
+                    self._send({"projects":
+                                server.projects.list_projects(org_id=org_id)})
+                    return
+                if path == "/api/worker/status":
+                    self._send({"queue": server.worker.queue_length(),
+                                "stats": server.worker.stats})
                     return
                 if path.startswith("/api/projects/") and path.endswith("/results"):
                     pid = path[len("/api/projects/"):-len("/results")]
@@ -221,8 +318,44 @@ class EnterpriseServer:
                     self._send({"remediations":
                                 server.projects.list_remediations(pid)})
                     return
-                if path == "/api/health":
+                self._send({"error": "not found"}, 404)
+
+            def do_DELETE(self):
+                path = self.path.split("?")[0]
+                user = server._auth_user(self._token(),
+                                         min_level=Role.LEVEL[Role.PENTESTER])
+                if not user:
+                    self._send({"error": "unauthorized"}, 401)
+                    return
+                if path.startswith("/api/results/"):
+                    rid = path[len("/api/results/"):]
+                    server.projects.delete_result(rid)
                     self._send({"ok": True})
+                    return
+                if path.startswith("/api/projects/"):
+                    pid = path[len("/api/projects/"):]
+                    server.projects.delete_project(pid)
+                    self._send({"ok": True})
+                    return
+                self._send({"error": "not found"}, 404)
+
+            def do_PATCH(self):
+                path = self.path.split("?")[0]
+                body = self._body()
+                user = server._auth_user(self._token(),
+                                         min_level=Role.LEVEL[Role.PENTESTER])
+                if not user:
+                    self._send({"error": "unauthorized"}, 401)
+                    return
+                if path.startswith("/api/projects/"):
+                    pid = path[len("/api/projects/"):]
+                    ok_ = server.projects.update_project(
+                        pid,
+                        name=str(body.get("name", "")) if body.get("name") else None,
+                        client=str(body.get("client", "")) if body.get("client") else None,
+                        targets=body.get("targets"),
+                        schedule=str(body.get("schedule", "")) if body.get("schedule") else None)
+                    self._send({"ok": ok_})
                     return
                 self._send({"error": "not found"}, 404)
 
@@ -249,6 +382,7 @@ class EnterpriseServer:
 
     def stop(self) -> None:
         self.scheduler.stop()
+        self.worker.stop()
         if self._server:
             self._server.shutdown()
             self._server.server_close()

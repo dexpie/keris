@@ -9,6 +9,7 @@ WORKDIR /app
 # Salin dependensi dulu untuk memanfaatkan cache layer
 COPY pyproject.toml README.md ./
 COPY keris ./keris
+COPY keris_enterprise ./keris_enterprise
 COPY plugins ./plugins
 
 RUN pip install --no-cache-dir .

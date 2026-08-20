@@ -1,8 +1,10 @@
-"""CLI keris-enterprise: setup / start / status / stop.
+"""CLI keris-enterprise: setup / start / status / stop / worker / scheduler.
 
 Contoh:
     python -m keris_enterprise setup --admin-email admin@company.com
     python -m keris_enterprise start --port 9000
+    python -m keris_enterprise worker --port 9000
+    python -m keris_enterprise scheduler --port 9000
     python -m keris_enterprise status
     python -m keris_enterprise stop
 """
@@ -37,8 +39,47 @@ def _start(args) -> int:
         except Exception:
             warn("Admin sudah ada; lewati pembuatan user.")
     srv.scheduler.start()
-    ok("Scheduler aktif.")
+    srv.worker.start()
+    ok("Scheduler + worker aktif.")
     srv.run_forever()
+    return 0
+
+
+def _worker(args) -> int:
+    """Jalankan worker scan saja (dipakai docker-compose service worker)."""
+    from keris_enterprise import EnterpriseServer
+
+    srv = EnterpriseServer(host=args.host, port=args.port, db_path=args.db,
+                           authorized=args.authorized)
+    srv.worker.start()
+    ok("Worker scan aktif (Ctrl+C untuk berhenti).")
+    try:
+        while True:
+            srv._shutdown.wait(1.0)
+    except KeyboardInterrupt:
+        pass
+    srv.worker.stop()
+    srv.db.close()
+    ok("Worker dihentikan")
+    return 0
+
+
+def _scheduler(args) -> int:
+    """Jalankan scheduler scan terjadwal saja (docker-compose service)."""
+    from keris_enterprise import EnterpriseServer
+
+    srv = EnterpriseServer(host=args.host, port=args.port, db_path=args.db,
+                           authorized=args.authorized)
+    srv.scheduler.start()
+    ok("Scheduler scan terjadwal aktif (Ctrl+C untuk berhenti).")
+    try:
+        while True:
+            srv._shutdown.wait(1.0)
+    except KeyboardInterrupt:
+        pass
+    srv.scheduler.stop()
+    srv.db.close()
+    ok("Scheduler dihentikan")
     return 0
 
 
@@ -49,13 +90,14 @@ def _status(args) -> int:
 
     srv = EnterpriseServer(host="127.0.0.1", port=0, db_path=args.db)
     dash = srv.dashboard()
+    dash["queue"] = srv.worker.queue_length()
     srv.db.close()
     if args.json:
         print(json.dumps(dash, indent=2, default=str))
     else:
         ok(f"Project: {dash['projects']} | Hasil: {dash['recent_results']} | "
            f"Temuan: {dash['total_findings']} | Remediasi open: "
-           f"{dash['remediations_open']}")
+           f"{dash['remediations_open']} | Queue worker: {dash['queue']}")
     return 0
 
 
@@ -74,7 +116,7 @@ def main(argv=None) -> int:
     ps.add_argument("--admin-password", default="admin123")
     ps.add_argument("--db", default="")
     ps.set_defaults(fn=_setup)
-    ps2 = sub.add_parser("start", help="Jalankan server + scheduler")
+    ps2 = sub.add_parser("start", help="Jalankan server + scheduler + worker")
     ps2.add_argument("--host", default="0.0.0.0")
     ps2.add_argument("--port", type=int, default=9000)
     ps2.add_argument("--db", default="")
@@ -83,6 +125,18 @@ def main(argv=None) -> int:
     ps2.add_argument("--admin-password", default="")
     ps2.add_argument("--admin-email", default="")
     ps2.set_defaults(fn=_start)
+    pwk = sub.add_parser("worker", help="Jalankan worker scan saja")
+    pwk.add_argument("--host", default="0.0.0.0")
+    pwk.add_argument("--port", type=int, default=9000)
+    pwk.add_argument("--db", default="")
+    pwk.add_argument("--authorized", action="store_true")
+    pwk.set_defaults(fn=_worker)
+    psch = sub.add_parser("scheduler", help="Jalankan scheduler scan terjadwal")
+    psch.add_argument("--host", default="0.0.0.0")
+    psch.add_argument("--port", type=int, default=9000)
+    psch.add_argument("--db", default="")
+    psch.add_argument("--authorized", action="store_true")
+    psch.set_defaults(fn=_scheduler)
     ps3 = sub.add_parser("status", help="Ringkasan dashboard")
     ps3.add_argument("--db", default="")
     ps3.add_argument("--json", action="store_true")

@@ -139,6 +139,7 @@ never expose it publicly.
 | `watch` | Continuous monitoring: scan terjadwal + diff + risk trend + alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/generic webhook) |
 | `fuzz` | Intelligent fuzzing: payload sesuai tipe param (numeric/path/string/search) & teknologi stack; mutation fuzzing pada nilai asli |
 | `lateral` | Advanced pivoting & lateral movement: network discovery + banner, tunnel ssh/chisel/dns/icmp, spread via kredensial internal (wajib --authorized) |
+| `enterprise` | Enterprise microservices: orgs/tenants, RBAC matrix, scan CRUD API + worker/scheduler, docker-compose |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -469,6 +470,40 @@ keris watch https://app.example.com --interval 3600 --state-dir .keris-watch \
   `--min-severity`; kanal bisa banyak sekaligus — Slack, Discord, Telegram,
   Microsoft Teams, email SMTP (STARTTLS/SSL), PagerDuty Events API v2, atau
   generic JSON webhook. Tanpa `--webhook-type`, jenis dideteksi dari URL.
+
+### Enterprise microservices (`enterprise`)
+
+Paket `keris-enterprise` menyediakan deployment multi-tenant berbasis REST API
+(daftar endpoint lengkap di docstring `keris_enterprise/api.py`):
+
+```bash
+python -m keris_enterprise setup --admin-user admin --admin-password s3cret
+python -m keris_enterprise start --port 9000        # API + scheduler + worker
+python -m keris_enterprise status --json
+```
+
+- **Orgs / tenants** (`keris_enterprise/orgs.py`): multi-tenant organizations,
+  keanggotaan per org (`org_users`), dan isolasi project per org. Migrasi
+  kolom `org_id` otomatis untuk DB lama; `org_id=""` = global.
+- **RBAC matrix** (`rbac_matrix`): matriks izin per role (admin/pentester/
+  viewer) — `scan`, `manage_projects`, `manage_users`, `manage_orgs`,
+  `view_results`, `run_scheduler`, `view_reports`, `manage_remediations`;
+  terlihat lewat `GET /api/rbac`.
+- **Scan CRUD API**: `POST /api/projects/<id>/scan` (sync) dan
+  `/scan/queue` (async ke worker), `GET /api/projects/<id>/results`,
+  `GET/DELETE /api/results/<rid>`, `PATCH/DELETE /api/projects/<id>`,
+  `GET /api/worker/status`.
+- **Worker & scheduler** (`worker.py`): `ScanWorker` memproses antrean scan
+  di thread background (subprocess `keris scan --json-output`), konkurrensi
+  bisa diatur; `Scheduler` untuk scan terjadwal per project.
+- **docker-compose**: tiga service terpisah (`enterprise-api`,
+  `enterprise-worker`, `enterprise-scheduler`) + profil `cli` untuk
+  penggunaan keris langsung:
+
+```bash
+docker compose up -d          # api + worker + scheduler
+docker compose run --rm keris scan https://example.com
+```
 
 ### Advanced pivoting & lateral movement (`lateral`)
 
@@ -1121,6 +1156,7 @@ keris/
 - [x] **Continuous monitoring (`watch`): scheduled scans, diff, risk trend, alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/webhook)**
 - [x] **Intelligent fuzzing (`fuzz`): payload by param type + stack detection + mutation fuzzing**
 - [x] **Advanced pivoting & lateral movement (`lateral`): network discovery, ssh/chisel/dns/icmp tunnels, spread via internal creds**
+- [x] **Enterprise microservices (`enterprise`): orgs/tenants, RBAC matrix, scan CRUD API + worker/scheduler, docker-compose**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
