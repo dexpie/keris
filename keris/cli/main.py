@@ -8,7 +8,7 @@ from keris.core.logger import error, ok, set_quiet
 
 from keris.cli.auth import (
     _cmd_authbypass, _cmd_cloud, _cmd_crack, _cmd_credcheck, _cmd_dbdump,
-    _cmd_exploit, _cmd_gitdump, _cmd_hunt, _cmd_k8s, _cmd_pivot,
+    _cmd_exploit, _cmd_gitdump, _cmd_hunt, _cmd_k8s, _cmd_lateral, _cmd_pivot,
     _cmd_rebind, _cmd_shell, _cmd_spray, _cmd_xsshook,
 )
 from keris.cli.common import EXIT_ERROR, EXIT_OK, _merge_config, _parse_args
@@ -150,6 +150,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_shell(args, cfg, overrides)
         if args.command == "pivot":
             return _cmd_pivot(args, cfg, overrides)
+        if args.command == "lateral":
+            return _cmd_lateral(args, cfg, overrides)
         if args.command == "rebind":
             return _cmd_rebind(args, cfg, overrides)
         if args.command == "gitdump":

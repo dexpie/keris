@@ -584,6 +584,32 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ppv.add_argument("--authorized", action="store_true",
                      help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
 
+    # lateral (advanced pivoting & lateral movement)
+    plat = sub.add_parser("lateral", parents=[common],
+                          help="Advanced pivoting & lateral movement: network discovery, "
+                               "tunnel ssh/chisel/dns/icmp, spread via kredensial (wajib --authorized)")
+    plat.add_argument("--rce-candidate", action="append", default=[],
+                      help="Endpoint RCE yang dikonfirmasi, format url|param (bisa diulang)")
+    plat.add_argument("--ssrf-url", default="",
+                      help="URL parameter SSRF (mis. http://host/fetch?url=1)")
+    plat.add_argument("--ssrf-param", default="", help="Nama parameter SSRF")
+    plat.add_argument("--internal-ports", default="",
+                      help="Daftar port internal dipisah koma (default: service umum)")
+    plat.add_argument("--scan-depth", type=int, default=2,
+                      help="Seberapa dalam jaringan internal di-scan (default: 2)")
+    plat.add_argument("--tunnel", choices=["socks5", "ssh", "chisel", "dns", "icmp"],
+                      default="socks5", help="Metode tunnel (default: socks5)")
+    plat.add_argument("--lhost", default="", help="Host attacker (untuk tunnel)")
+    plat.add_argument("--lport", type=int, default=1080,
+                      help="Port lokal untuk tunnel (default: 1080)")
+    plat.add_argument("--dns-domain", default="",
+                      help="Subdomain untuk DNS tunnel (mis. tun.example.com)")
+    plat.add_argument("--yes", action="store_true",
+                      help="KONFIRMASI izin tertulis untuk menjalankan tunnel/lateral")
+    plat.add_argument("--authorized", action="store_true",
+                      help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
+    plat.add_argument("--json-output", help="File output JSON")
+
     # rebind (DNS rebinding server)
     prb = sub.add_parser("rebind", parents=[common],
                          help="Server DNS rebinding untuk bypass SSRF (wajib --authorized --yes)")

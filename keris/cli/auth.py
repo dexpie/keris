@@ -303,6 +303,70 @@ def _cmd_pivot(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_lateral(args, cfg, overrides) -> int:
+    from keris.core.logger import brutal_warning
+    from keris.modules.lateral import run_lateral
+
+    brutal_warning("LATERAL MOVEMENT")
+    if not getattr(args, "authorized", False):
+        error("Lateral memerlukan --authorized (izin tertulis).")
+        return EXIT_ERROR
+    if not getattr(args, "yes", False):
+        warn("Tanpa --yes, tunnel server tidak dijalankan; hanya discovery "
+             "jaringan + creds + peta lateral.")
+
+    targets = _resolve_targets(args)
+    rce_candidates = []
+    for cand in getattr(args, "rce_candidate", []) or []:
+        if "|" in cand:
+            u, p = cand.split("|", 1)
+            rce_candidates.append((u, p))
+    internal_ports = [int(x) for x in
+                      (getattr(args, "internal_ports", "") or "").split(",")
+                      if x.strip().isdigit()] or None
+
+    all_findings = []
+    for target in targets:
+        base = normalize_url(target)
+        client = _make_client(args, cfg, overrides, base)
+        try:
+            res = run_lateral(
+                base, client,
+                rce_candidates=rce_candidates or None,
+                ssrf_url=getattr(args, "ssrf_url", "") or "",
+                ssrf_param=getattr(args, "ssrf_param", "") or "",
+                internal_ports=internal_ports,
+                internal_scan_depth=getattr(args, "scan_depth", 2) or 2,
+                tunnel_method=getattr(args, "tunnel", "socks5") or "socks5",
+                lhost=getattr(args, "lhost", "") or "",
+                lport=getattr(args, "lport", 1080) or 1080,
+                dns_domain=getattr(args, "dns_domain", "") or "",
+                authorized=True,
+                yes=bool(getattr(args, "yes", False)),
+            )
+        finally:
+            client.close()
+        if "error" in res:
+            error(f"Lateral gagal: {res['error']}")
+            continue
+        all_findings.extend(res.get("findings", []))
+        ok(f"Target {target}: {len(res.get('services', []))} service internal, "
+           f"{len(res.get('creds', []))} creds, "
+           f"{len(res.get('moves', {}).get('moves', []))} jalur lateral")
+        if res.get("tunnel") and res["tunnel"].get("note"):
+            info(f"Tunnel {res['tunnel']['method']}: {res['tunnel']['note']}")
+        if getattr(args, "json_output", ""):
+            _ensure_parent(args.json_output)
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"target": base, "lateral": res}, f, indent=2,
+                          default=str)
+            ok(f"JSON output: {args.json_output}")
+
+    if not all_findings:
+        ok("Tidak ada temuan lateral.")
+    return _exit_code(all_findings, getattr(args, "exit_on", "high"))
+
+
 def _cmd_rebind(args, cfg, overrides) -> int:
     from keris.core.logger import brutal_warning
 

