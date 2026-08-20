@@ -24,7 +24,8 @@ from keris.cli.scan import (
     _cmd_crawl, _cmd_discover, _cmd_enterprise, _cmd_farm, _cmd_fuzz,
     _cmd_graphql, _cmd_har, _cmd_hidden, _cmd_hostheader, _cmd_jsanalysis,
     _cmd_openapi, _cmd_params, _cmd_plugins, _cmd_re, _cmd_report, _cmd_retest,
-    _cmd_scan, _cmd_sensitive, _cmd_smuggling, _cmd_takeover, _cmd_websocket,
+    _cmd_scan, _cmd_sensitive, _cmd_smuggling, _cmd_takeover, _cmd_toolbox,
+    _cmd_websocket,
 )
 
 
@@ -183,6 +184,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_chain(args, cfg, overrides)
         if args.command == "report":
             return _cmd_report(args, cfg, overrides)
+        if args.command == "toolbox":
+            return _cmd_toolbox(args, cfg, overrides)
         if args.command == "init":
             from keris.core.config import save_example_config
 

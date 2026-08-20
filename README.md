@@ -134,6 +134,7 @@ never expose it publicly.
 | `wayback` / `subdomain` | Wayback CDX historical URL mining; subdomain enumeration (crt.sh + brute + wildcard DNS detection) |
 | `crawl` / `graphql` / `smuggling` / `takeover` | Attack-surface map, GraphQL testing, request smuggling, subdomain takeover |
 | `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (incl. password-reset poisoning), WebSocket auth & Origin checks |
+| `toolbox` | Offline utility kit: encode/decode, hashing + crack, payload generator (SQLi/XSS/LFI/SSRF/cmd) with mutations, reverse shells, wordlists, port scan, DNS check, JWT decode/analyze, gzip/zlib |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -417,6 +418,29 @@ Windows Terminal too):
 ```bash
 keris tui https://example.com
 ```
+
+### Offline toolbox (`toolbox`)
+
+A set of local utilities (no requests to the target) for quick encoding, hashing,
+payload generation, and recon helpers:
+
+```bash
+keris toolbox --tool encode --value "a b&c" --enc url     # a%20b%26c
+keris toolbox --tool decode --value dGVzdA== --enc base64  # test
+keris toolbox --tool hash --value keris                    # all algos
+keris toolbox --tool crack --value <sha256> --word seed    # dictionary lookup
+keris toolbox --tool payload --value sqli                  # SQLi payloads
+keris toolbox --tool mutate --value "' OR 1=1--" --mutation url --mutation b64
+keris toolbox --tool shell --lang bash --lhost 10.0.0.1 --lport 4444
+keris toolbox --tool wordlist --word acme                  # username+password seeds
+keris toolbox --tool ports --value scanme.example.com      # TCP port scan
+keris toolbox --tool dns --value example.com               # DNS + SPF/DMARC/DKIM
+keris toolbox --tool jwt --value <token>                   # decode
+keris toolbox --tool list                                  # all tools
+```
+
+Payloads cover SQLi, XSS, LFI/path traversal, SSRF, and command injection;
+`--mutation` expands a payload with encoding/case/comment variants.
 
 ### Credential hunting (`hunt`)
 
@@ -993,6 +1017,7 @@ keris/
 - [x] **Interactive terminal UI (`tui`)**
 - [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
 - [x] **Advanced hunt: 50+ secret patterns, `--deep` paths, `--types` filter, `--from-scan`**
+- [x] **Offline toolbox (`toolbox`): encode/decode, hash/crack, payloads, shells, wordlists, ports, dns, jwt**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**

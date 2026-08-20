@@ -865,6 +865,81 @@ def _cmd_farm(args, cfg, overrides) -> int:
     return EXIT_ERROR
 
 
+def _cmd_toolbox(args, cfg, overrides) -> int:
+    import keris.modules.toolbox as tb
+
+    tool = args.tool
+    value = args.value
+    if tool == "list":
+        result = tb.list_tools()
+        result = tb.list_tools()
+        for name, desc in result.items():
+            print(f"  {name:<12} {desc}")
+        return EXIT_OK
+    if tool in ("encode", "decode"):
+        enc = getattr(args, "enc", "base64")
+        result = tb.encode_text(value, enc) if tool == "encode" else tb.decode_text(value, enc)
+        print(result)
+    elif tool == "hash":
+        result = tb.hash_candidates(value)
+        for algo, h in result.items():
+            print(f"  {algo:<10} {h}")
+    elif tool == "crack":
+        result = tb.crack_lookup({getattr(args, "algo", "sha256"): value},
+                                 tb.wordlist_passwords(getattr(args, "word", "")))
+        if result:
+            for r in result:
+                ok(f"{r['algo']} {r['hash']} = {r['plaintext']}")
+        else:
+            warn("Tidak ada hash yang cocok di wordlist.")
+    elif tool == "payload":
+        result = tb.payload_group(getattr(args, "group", value or "sqli"))
+        for p in result:
+            print(f"  {p}")
+    elif tool == "mutate":
+        muts = getattr(args, "mutation", []) or ["url"]
+        result = tb.payload_mutation(value, muts)
+        for p in result:
+            print(f"  {p}")
+    elif tool == "shell":
+        result = tb.reverse_shell(getattr(args, "lang", value or "bash"),
+                                  args.lhost, args.lport)
+        print(result)
+    elif tool == "wordlist":
+        seed = getattr(args, "word", "") or value
+        result = tb.wordlist_usernames(seed) + tb.wordlist_passwords(seed)
+        for w in result:
+            print(f"  {w}")
+    elif tool == "ports":
+        result = tb.scan_ports(value)
+        for p in result:
+            print(f"  {p:<6} {tb.port_service(p)}")
+        print(f"\n({len(result)} port terbuka)")
+    elif tool == "dns":
+        import json as _json
+        result = tb.dns_lookup(value)
+        print(_json.dumps(result, indent=2, default=str))
+    elif tool == "jwt":
+        import json as _json
+        print(_json.dumps(tb.jwt_decode(value), indent=2, default=str))
+    elif tool == "jwt-analyze":
+        for f in tb.jwt_analyze(value):
+            print(f"  [{f.get('severity', '?')}] {f.get('title', '')} @ {f.get('endpoint', '')}")
+    elif tool in ("gzip", "gunzip"):
+        result = tb.gzip_encode(value) if tool == "gzip" else tb.gzip_decode(value)
+        print(result)
+    else:
+        error(f"Tool tak dikenal: {tool}")
+        return EXIT_ERROR
+
+    if getattr(args, "json_output", None):
+        _ensure_parent(args.json_output)
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"tool": tool, "result": result}, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
 def _cmd_enterprise(args, cfg, overrides) -> int:
     from keris.core.logger import brutal_warning
 

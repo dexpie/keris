@@ -20,6 +20,12 @@ from keris.modules import plugins as plugins_module
 from keris.report import write_report
 from keris.report_html import write_html_report
 
+TOOLBOX_TOOLS = [
+    "encode", "decode", "hash", "crack", "payload", "mutate", "shell",
+    "wordlist", "ports", "dns", "jwt", "jwt-analyze", "gzip", "gunzip",
+    "list",
+]
+
 __all__ = [
     "EXIT_OK", "EXIT_FINDINGS", "EXIT_ERROR",
     "_parse_args", "_resolve_targets", "_merge_config", "_make_client",
@@ -507,6 +513,28 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     psh.add_argument("--authorized", action="store_true",
                      help="KONFIRMASI izin tertulis untuk eksploitasi aktif")
     psh.add_argument("--json-output", help="File output JSON")
+
+    # toolbox (kumpulan utilitas pentest lokal)
+    ptb = sub.add_parser("toolbox", parents=[common],
+                         help="Kumpulan utilitas pentest lokal: encode/decode, hash, payload, shell, wordlist, ports, dns, jwt")
+    ptb.add_argument("--tool", choices=TOOLBOX_TOOLS, default="list",
+                     help="Tool yang dijalankan")
+    ptb.add_argument("--value", default="",
+                     help="Nilai input (teks, token, host, atau payload)")
+    ptb.add_argument("--enc", default="base64",
+                     help="Encoding untuk encode/decode (base64,url,hex,html,unicode,rot13,urlplus)")
+    ptb.add_argument("--algo", default="sha256",
+                     help="Algoritma hash (md5,sha1,sha256,sha512,...)")
+    ptb.add_argument("--group", default="sqli",
+                     help="Kelompok payload (sqli,xss,lfi,ssrf,cmd)")
+    ptb.add_argument("--mutation", action="append", default=[],
+                     help="Mutasi payload (upper,url,double_url,b64,hex,space_comment,null,tab)")
+    ptb.add_argument("--lang", default="bash",
+                     help="Bahasa reverse shell (bash,python,powershell)")
+    ptb.add_argument("--lhost", default="127.0.0.1", help="IP untuk reverse shell")
+    ptb.add_argument("--lport", type=int, default=4444, help="Port untuk reverse shell")
+    ptb.add_argument("--word", default="", help="Kata seed untuk wordlist")
+    ptb.add_argument("--json-output", help="File output JSON")
 
     # pivot (SOCKS5 tunnel via SSRF)
     ppv = sub.add_parser("pivot", parents=[common],
