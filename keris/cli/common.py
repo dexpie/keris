@@ -220,8 +220,18 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pl.add_argument("--json-output", help="File output JSON")
 
     # fuzz (jalankan fuzzer parameter saja)
-    pf = sub.add_parser("fuzz", parents=[common], help="Fuzzing parameter sederhana")
+    pf = sub.add_parser("fuzz", parents=[common],
+                        help="Intelligent fuzzing: payload sesuai tipe param & teknologi stack")
     pf.add_argument("--json-output", help="File output JSON")
+    pf.add_argument("--mode", choices=["smart", "mutation", "basic"], default="smart",
+                    help="Mode fuzzing (default: smart = tipe+stack aware; mutation = "
+                         "variasi nilai asli; basic = FUZZ_VALUES lama)")
+    pf.add_argument("--tech", default=None,
+                    help="Override teknologi stack (PHP, Node.js, Java, ...). Default: deteksi otomatis")
+    pf.add_argument("--max-per-endpoint", type=int, default=8,
+                    help="Jumlah parameter maksimal per endpoint (default: 8)")
+    pf.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
+                    help="Severity minimum yang menyebabkan exit code 1")
 
     # jwt (decode & analisis token)
     pj = sub.add_parser("jwt", help="Decode & analisis keamanan token JWT")

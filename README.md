@@ -137,6 +137,7 @@ never expose it publicly.
 | `toolbox` | Offline utility kit: encode/decode, hashing + crack, payload generator (SQLi/XSS/LFI/SSRF/cmd) with mutations, reverse shells, wordlists, port scan, DNS check, JWT decode/analyze, gzip/zlib |
 | `sast` | Client-side static analysis: source/JS bundle sinks + secrets, dependency CVE DB, CycloneDX SBOM |
 | `watch` | Continuous monitoring: scan terjadwal + diff + risk trend + alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/generic webhook) |
+| `fuzz` | Intelligent fuzzing: payload sesuai tipe param (numeric/path/string/search) & teknologi stack; mutation fuzzing pada nilai asli |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -467,6 +468,31 @@ keris watch https://app.example.com --interval 3600 --state-dir .keris-watch \
   `--min-severity`; kanal bisa banyak sekaligus — Slack, Discord, Telegram,
   Microsoft Teams, email SMTP (STARTTLS/SSL), PagerDuty Events API v2, atau
   generic JSON webhook. Tanpa `--webhook-type`, jenis dideteksi dari URL.
+
+### Intelligent fuzzing (`fuzz`)
+
+Fuzzer parameter yang menyesuaikan payload dengan tipe parameter dan teknologi
+target, plus mutation fuzzing:
+
+```bash
+keris fuzz https://app.example.com --mode smart             # default
+keris fuzz https://app.example.com --mode mutation          # variasi nilai asli
+keris fuzz https://app.example.com --mode basic             # FUZZ_VALUES lama
+keris fuzz https://app.example.com --tech PHP --max-per-endpoint 12
+```
+
+- **Tipe parameter otomatis** (`_guess_param_type`): `numeric` (id/page/limit/
+  offset), `path` (file/path/redirect/callback/url), `search` (q/query/search),
+  `order` (sort/order), dst. Setiap tipe mendapat payload yang relevan
+  (mis. `numeric` → integer overflow + SQLi, `path` → LFI/traversal/CMDI).
+- **Stack-aware**: deteksi teknologi dari header + HTML (PHP, Node.js, Java,
+  Python/Django, WordPress, Laravel, Rails, ...) lalu tambahkan payload khusus
+  stack (mis. PHP → `php://filter`, Node → prototype pollution, Java → EL/SSTI).
+  Bisa di-override dengan `--tech`.
+- **Mutation fuzzing** (`fuzz_mutate`): menghasilkan variasi nilai asli
+  parameter (truncate, swapcase, url-encode, double-encode, null-byte, NFC/NFD,
+  repeat) dan menandai status 5xx baru — deteksi parser/pengkodean yang aneh.
+- Exit code mengikuti `--exit-on` (default: high) bila ada indikasi serius.
 
 ### Client-side SAST (`sast`)
 
@@ -1067,6 +1093,7 @@ keris/
 - [x] **Offline toolbox (`toolbox`): encode/decode, hash/crack, payloads, shells, wordlists, ports, dns, jwt**
 - [x] **Client-side SAST (`sast`): source analyzer, dependency CVE DB, CycloneDX SBOM**
 - [x] **Continuous monitoring (`watch`): scheduled scans, diff, risk trend, alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/webhook)**
+- [x] **Intelligent fuzzing (`fuzz`): payload by param type + stack detection + mutation fuzzing**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**

@@ -240,22 +240,36 @@ def _cmd_retest_live(args, cfg, overrides) -> int:
 def _cmd_fuzz(args, cfg, overrides) -> int:
     from keris.modules import fuzz as fuzz_module
 
+    mode = getattr(args, "mode", "smart") or "smart"
+    tech = getattr(args, "tech", None) or None
+    max_pp = getattr(args, "max_per_endpoint", 8) or 8
     targets = _resolve_targets(args)
+    all_findings = []
     for target in targets:
         base = normalize_url(target)
         client = _make_client(args, cfg, overrides, base)
         try:
             disc = discovery_module.discover_endpoints(base, client, max_assets=overrides.get("max_assets", cfg.max_assets))
-            info(f"Fuzz {len(disc.get('api_endpoints', []))} endpoint...")
-            findings = fuzz_module.fuzz_parameters(base, client, disc.get("api_endpoints", []))
+            eps = disc.get("api_endpoints", [])
+            info(f"Fuzz {len(eps)} endpoint (mode={mode})...")
+            if mode == "mutation":
+                findings = fuzz_module.fuzz_mutate(base, client, eps, max_per_endpoint=max_pp)
+            elif mode == "basic":
+                findings = fuzz_module.fuzz_parameters(base, client, eps, max_per_endpoint=max_pp)
+            else:
+                findings = fuzz_module.fuzz_intelligent(base, client, eps,
+                                                        max_per_endpoint=max_pp, tech=tech)
         finally:
             client.close()
+        all_findings.extend(findings)
         ok(f"Fuzz selesai: {len(findings)} sinyal perlu verifikasi manual")
         if args.json_output:
             with open(args.json_output, "w", encoding="utf-8") as f:
-                json.dump({"target": base, "findings": [x.to_dict() for x in findings]}, f, indent=2)
+                json.dump({"target": base, "mode": mode,
+                           "findings": [x.to_dict() for x in findings]}, f, indent=2)
             ok(f"JSON output: {args.json_output}")
-    return EXIT_OK
+    return _exit_code([x.to_dict() for x in all_findings],
+                      getattr(args, "exit_on", "high"))
 
 
 def _cmd_discover(args, cfg, overrides) -> int:
