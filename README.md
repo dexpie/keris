@@ -90,6 +90,21 @@ python tests/demo_vuln_server.py        # 127.0.0.1:8099, intentionally vulnerab
 keris scan http://127.0.0.1:8099 -o demo.md --hidden-endpoints
 ```
 
+## Interactive menu
+
+Don't remember the flags? `keris menu` shows a numbered list of the most-used
+tools — pick a number, type your target, and Keris runs the right subcommand
+for you. Active tools (e.g. the app-layer resilience test) still require the
+written-permission confirmation before anything runs.
+
+```bash
+python -m keris menu
+```
+
+<p align="center">
+  <img src="docs/screenshots/menu.png" alt="Keris interactive menu" width="560">
+</p>
+
 ## Also has a web UI
 
 `serve` starts a local glassmorphism-styled page at `http://127.0.0.1:8181`.
@@ -139,6 +154,7 @@ never expose it publicly.
 | `watch` | Continuous monitoring: scan terjadwal + diff + risk trend + alert multi-channel (Slack/Discord/Telegram/Teams/email/PagerDuty/generic webhook) |
 | `fuzz` | Intelligent fuzzing: payload sesuai tipe param (numeric/path/string/search) & teknologi stack; mutation fuzzing pada nilai asli |
 | `lateral` | Advanced pivoting & lateral movement: network discovery + banner, tunnel ssh/chisel/dns/icmp, spread via kredensial internal (wajib --authorized) |
+| `menu` | Interactive numbered menu of the most-used tools — pick a number, type the target, done |
 | `enterprise` | Enterprise microservices: orgs/tenants, RBAC matrix, scan CRUD API + worker/scheduler, docker-compose |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |

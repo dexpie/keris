@@ -12,6 +12,7 @@ from keris.cli.auth import (
     _cmd_rebind, _cmd_shell, _cmd_spray, _cmd_xsshook,
 )
 from keris.cli.common import EXIT_ERROR, EXIT_OK, _merge_config, _parse_args
+from keris.cli.menu import _cmd_menu
 from keris.cli.monitor import _cmd_dos, _cmd_serve, _cmd_tui, _cmd_watch
 from keris.cli.recon import (
     _cmd_buckets, _cmd_dns, _cmd_jwt, _cmd_passive, _cmd_platforms, _cmd_ports,
@@ -140,6 +141,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_watch(args, cfg, overrides)
         if args.command == "tui":
             return _cmd_tui(args, cfg, overrides)
+        if args.command == "menu":
+            return _cmd_menu(args, cfg, overrides)
         if args.command == "hunt":
             return _cmd_hunt(args, cfg, overrides)
         if args.command == "credcheck":

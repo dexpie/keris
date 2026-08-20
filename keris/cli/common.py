@@ -489,6 +489,11 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     ptu.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     ptu.add_argument("--quiet", action="store_true", help="Minimal output")
 
+    # menu (interaktif berbasis angka)
+    pm = sub.add_parser("menu", help="Menu interaktif: pilih tool via angka (1-13), tanpa command panjang")
+    pm.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    pm.add_argument("--quiet", action="store_true", help="Minimal output")
+
     # hunt (credential hunting)
     phu = sub.add_parser("hunt", parents=[common],
                          help="Credential hunting: .git dump, .env/backup, secret cloud key")
