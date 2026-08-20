@@ -22,6 +22,9 @@ reports/
 # Web UI artifacts
 .keris-ui/
 
+# Secret runtime farm (auto-generated oleh keris/farm/auth.py)
+keris/farm/farm-secret.txt
+
 # Config yang mungkin berisi kredensial
 keris.json
 !keris.json.example
