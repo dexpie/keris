@@ -251,6 +251,16 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Timeout koneksi (detik)")
     pt.add_argument("--json-output", help="File output JSON")
 
+    # http (mass status/title scan)
+    phx = sub.add_parser("http", parents=[common],
+                         help="HTTP mass-scan: status, title, server, tech, redirect dari banyak URL")
+    phx.add_argument("--workers", type=int, default=20, help="Jumlah thread (default 20)")
+    phx.add_argument("--follow", action="store_true",
+                     help="Ikuti redirect (default: tampilkan status asli + Location)")
+    phx.add_argument("--json-output", help="File output JSON")
+    phx.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="none",
+                     help="Severity minimum yang menyebabkan exit code 1 (default: none)")
+
     # openapi (import spec & fuzz endpoint)
     po = sub.add_parser("openapi", parents=[common], help="Import OpenAPI/Swagger & fuzz endpoint")
     po.add_argument("--json-output", help="File output JSON")
@@ -493,6 +503,17 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pm = sub.add_parser("menu", help="Menu interaktif: pilih tool via angka (1-13), tanpa command panjang")
     pm.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     pm.add_argument("--quiet", action="store_true", help="Minimal output")
+
+    # autopilot (pipeline lengkap tanpa prompt)
+    pa = sub.add_parser("autopilot", parents=[common],
+                        help="Jalankan pipeline lengkap otomatis: recon -> discover -> fuzz -> hunt -> scan+report, tanpa prompt")
+    pa.add_argument("--steps", default="",
+                    help="Step yang dijalankan (koma): recon,discover,fuzz,hunt,scan. Default: semua")
+    pa.add_argument("--json-output", help="File output JSON gabungan semua temuan")
+    pa.add_argument("--authorized", action="store_true",
+                    help="Tambahkan --authorized ke semua step serangan (butuh --yes)")
+    pa.add_argument("--yes", action="store_true",
+                    help="KONFIRMASI izin tertulis untuk step yang menyentuh target secara aktif")
 
     # hunt (credential hunting)
     phu = sub.add_parser("hunt", parents=[common],
@@ -866,7 +887,7 @@ def _resolve_targets(args) -> List[str]:
     if args.target:
         return [args.target]
     if args.targets and os.path.exists(args.targets):
-        with open(args.targets, "r", encoding="utf-8") as f:
+        with open(args.targets, "r", encoding="utf-8-sig") as f:
             return [line.strip() for line in f if line.strip() and not line.startswith("#")]
     if args.targets:
         raise SystemExit(f"File target tidak ditemukan: {args.targets}")

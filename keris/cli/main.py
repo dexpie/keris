@@ -12,11 +12,11 @@ from keris.cli.auth import (
     _cmd_rebind, _cmd_shell, _cmd_spray, _cmd_xsshook,
 )
 from keris.cli.common import EXIT_ERROR, EXIT_OK, _merge_config, _parse_args
-from keris.cli.menu import _cmd_menu
+from keris.cli.menu import _cmd_autopilot, _cmd_menu
 from keris.cli.monitor import _cmd_dos, _cmd_serve, _cmd_tui, _cmd_watch
 from keris.cli.recon import (
-    _cmd_buckets, _cmd_dns, _cmd_jwt, _cmd_passive, _cmd_platforms, _cmd_ports,
-    _cmd_project, _cmd_recon, _cmd_subdomain, _cmd_tls, _cmd_waf,
+    _cmd_buckets, _cmd_dns, _cmd_http, _cmd_jwt, _cmd_passive, _cmd_platforms,
+    _cmd_ports, _cmd_project, _cmd_recon, _cmd_subdomain, _cmd_tls, _cmd_waf,
     _cmd_wayback,
 )
 from keris.cli.report import _cmd_dashboard, _cmd_export
@@ -85,6 +85,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_jwt(args, cfg, overrides)
         if args.command == "ports":
             return _cmd_ports(args, cfg, overrides)
+        if args.command == "http":
+            return _cmd_http(args, cfg, overrides)
         if args.command == "openapi":
             return _cmd_openapi(args, cfg, overrides)
         if args.command == "bruteforce":
@@ -143,6 +145,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_tui(args, cfg, overrides)
         if args.command == "menu":
             return _cmd_menu(args, cfg, overrides)
+        if args.command == "autopilot":
+            return _cmd_autopilot(args, cfg, overrides)
         if args.command == "hunt":
             return _cmd_hunt(args, cfg, overrides)
         if args.command == "credcheck":

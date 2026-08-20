@@ -105,6 +105,25 @@ python -m keris menu
   <img src="docs/screenshots/menu.png" alt="Keris interactive menu" width="560">
 </p>
 
+## Autopilot & mass-scan
+
+Run the whole pipeline without typing long commands — `autopilot` chains
+recon, discovery, fuzzing, credential hunting and a full scan + report for one
+or many targets, then merges every finding into a single JSON summary:
+
+```bash
+python -m keris autopilot https://example.com \
+  --steps recon,discover,scan --json-output autopilot.json
+```
+
+Need a quick sanity check across many hosts instead? `http` probes a list of
+URLs in parallel and prints status, title, server and redirects:
+
+```bash
+printf 'https://a.com\nhttps://b.com\n' > urls.txt
+python -m keris http --targets urls.txt --workers 30 --follow
+```
+
 ## Also has a web UI
 
 `serve` starts a local glassmorphism-styled page at `http://127.0.0.1:8181`.
@@ -155,6 +174,8 @@ never expose it publicly.
 | `fuzz` | Intelligent fuzzing: payload sesuai tipe param (numeric/path/string/search) & teknologi stack; mutation fuzzing pada nilai asli |
 | `lateral` | Advanced pivoting & lateral movement: network discovery + banner, tunnel ssh/chisel/dns/icmp, spread via kredensial internal (wajib --authorized) |
 | `menu` | Interactive numbered menu of the most-used tools — pick a number, type the target, done |
+| `http` | HTTP mass-scan: status, title, server, tech, redirect dari banyak URL (file --targets) |
+| `autopilot` | Run a full pipeline automatically: recon → discover → fuzz → hunt → scan + report, no prompts |
 | `enterprise` | Enterprise microservices: orgs/tenants, RBAC matrix, scan CRUD API + worker/scheduler, docker-compose |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |

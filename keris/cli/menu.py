@@ -8,6 +8,7 @@ Tool serangan aktif (dos) tetap butuh konfirmasi izin tertulis.
 import sys
 from typing import List, Optional
 
+from keris.cli.common import EXIT_OK, _resolve_targets
 from keris.core.logger import brutal_warning, error, info, ok, warn
 
 TOOLS = [
@@ -64,6 +65,12 @@ TOOLS = [
         "need": "domain",
         "hint": "Domain, mis. example.com",
         "build": lambda v: ["wayback", v],
+    },
+    {
+        "name": "HTTP mass-scan (status, title, server, redirect)",
+        "need": "http_targets",
+        "hint": "Target dipisah spasi (mis. https://a.com https://b.com)",
+        "build": lambda v: ["http"] + v.split(),
     },
     {
         "name": "Deteksi subdomain takeover",
@@ -125,6 +132,12 @@ def _run_tool(tool: dict) -> Optional[List[str]]:
     if not val:
         warn("Batal: input kosong.")
         return None
+    if need == "http_targets":
+        targets = [t.strip() for t in val.split() if t.strip()]
+        if not targets:
+            warn("Batal: butuh minimal 1 target.")
+            return None
+        return ["http"] + targets
     return tool["build"](val)
 
 
@@ -142,7 +155,7 @@ def _cmd_menu(args, cfg, overrides) -> int:
 
     while True:
         _print_menu_simple()
-        raw = _input("Pilih [1-13] / 0 = keluar: ")
+        raw = _input(f"Pilih [1-{len(TOOLS)}] / 0 = keluar: ")
         if raw == "0":
             ok("Sampai jumpa.")
             return 0
@@ -163,3 +176,91 @@ def _cmd_menu(args, cfg, overrides) -> int:
             ok("Sampai jumpa.")
             return 0
     return 0
+
+
+AUTOPILOT_STEPS = [
+    {"name": "Recon", "alias": "recon", "build": lambda t: ["recon", t, "--json-output", "autopilot-recon.json"]},
+    {"name": "Discover", "alias": "discover", "build": lambda t: ["discover", t, "--brute", "--json-output", "autopilot-discover.json"]},
+    {"name": "Fuzz", "alias": "fuzz", "build": lambda t: ["fuzz", t, "--json-output", "autopilot-fuzz.json"]},
+    {"name": "Credential hunt", "alias": "hunt", "build": lambda t: ["hunt", t, "--json-output", "autopilot-hunt.json"]},
+    {"name": "Full scan + report", "alias": "scan", "build": lambda t: ["scan", t, "-o", "autopilot-report.md",
+                                                                        "--html", "autopilot-report.html",
+                                                                        "--json-output", "autopilot-scan.json",
+                                                                        "--hidden-endpoints", "--chain"]},
+]
+
+
+def _cmd_autopilot(args, cfg, overrides) -> int:
+    """Handler `keris autopilot`: jalankan pipeline lengkap tanpa prompt."""
+    from keris.cli.main import main as _main
+
+    targets = _resolve_targets(args)
+    steps = AUTOPILOT_STEPS
+    if getattr(args, "steps", ""):
+        allow = [s.strip().lower() for s in args.steps.split(",") if s.strip()]
+        steps = [s for s in AUTOPILOT_STEPS if s.get("alias", s["name"].lower()) in allow]
+        if not steps:
+            raise SystemExit("Tidak ada step yang cocok. Pilihan: " +
+                             ", ".join(s.get("alias", s["name"].lower()) for s in AUTOPILOT_STEPS))
+    if getattr(args, "authorized", False) and not getattr(args, "yes", False):
+        raise SystemExit("autopilot --authorized juga butuh --yes (konfirmasi izin tertulis).")
+
+    total = 0
+    all_findings = []
+    for target in targets:
+        info(f"\n===== AUTOPILOT TARGET: {target} =====")
+        for step in steps:
+            info(f"\n--- STEP: {step['name']} ---")
+            argv = step["build"](target)
+            if getattr(args, "authorized", False):
+                argv.append("--authorized")
+            if getattr(args, "yes", False):
+                argv.append("--yes")
+            code = _main(argv)
+            if code:
+                warn(f"Step {step['name']} selesai dengan kode {code}")
+            total += 1
+            # kumpulkan temuan dari output JSON step (bila ada)
+            for f in _autopilot_collect(argv):
+                if f not in all_findings:
+                    all_findings.append(f)
+
+    # laporan gabungan ringkas
+    if all_findings:
+        from collections import Counter
+
+        by_sev = Counter(f.get("severity", "INFO") for f in all_findings)
+        info("\n===== RINGKASAN AUTOPILOT =====")
+        info(f"Step dijalankan: {total} | Target: {len(targets)}")
+        info("Temuan: " + ", ".join(f"{k}: {v}" for k, v in sorted(by_sev.items())))
+        if getattr(args, "json_output", None):
+            import json
+            import os
+
+            payload = {
+                "tool": "keris", "mode": "autopilot",
+                "targets": targets, "steps": total,
+                "summary": dict(by_sev), "findings": all_findings,
+            }
+            os.makedirs(os.path.dirname(os.path.abspath(args.json_output)), exist_ok=True)
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, default=str)
+            ok(f"JSON gabungan: {args.json_output}")
+    return EXIT_OK
+
+
+def _autopilot_collect(argv) -> List[dict]:
+    """Ambil findings dari file JSON yang dihasilkan argv step."""
+    import json
+    import os
+
+    for a in argv:
+        if a.endswith(".json") and os.path.exists(a):
+            try:
+                with open(a, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                findings = data.get("findings", []) if isinstance(data, dict) else []
+                return [f for f in findings if isinstance(f, dict)]
+            except Exception:
+                continue
+    return []

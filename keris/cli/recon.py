@@ -77,6 +77,34 @@ def _cmd_ports(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_http(args, cfg, overrides) -> int:
+    from keris.modules.http import scan_urls, summarize
+
+    targets = _resolve_targets(args)
+    urls = []
+    for t in targets:
+        if t.lower().startswith("http://") or t.lower().startswith("https://"):
+            urls.append(t.rstrip("/"))
+        else:
+            urls.append("https://" + t.strip("/"))
+    results = scan_urls(
+        urls,
+        workers=getattr(args, "workers", 20) or 20,
+        timeout=getattr(args, "timeout", 8.0) or 8.0,
+        follow=getattr(args, "follow", False),
+        insecure=bool(overrides.get("insecure", False)),
+        proxy=overrides.get("proxy", ""),
+        token=overrides.get("token", ""),
+        cookie=overrides.get("cookie", ""),
+    )
+    summarize(results)
+    if args.json_output:
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump({"results": results}, f, indent=2)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+
 def _cmd_dns(args, cfg, overrides) -> int:
     from keris.modules.dnscheck import check_dns, resolve_subdomains
 
