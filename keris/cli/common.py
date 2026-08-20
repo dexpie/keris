@@ -733,6 +733,22 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pch.add_argument("--graph-only", action="store_true",
                      help="Hanya output DOT, tanpa teks markdown")
 
+    # report (professional reporting)
+    prp = sub.add_parser("report", help="Laporan profesional: template, finding template, PDF/MD/HTML, batch")
+    prp.add_argument("--from-scan", help="File hasil scan JSON")
+    prp.add_argument("--from-dir", help="Direktori berisi banyak scan JSON (batch)")
+    prp.add_argument("--template", choices=["standard", "owasp", "pci", "hipaa", "ctf"],
+                     default="standard", help="Template laporan (default: standard)")
+    prp.add_argument("--format", choices=["md", "pdf", "html"], default="md",
+                     help="Format output (default: md)")
+    prp.add_argument("--output", help="File output; wajib untuk --from-scan")
+    prp.add_argument("--out-dir", help="Direktori output batch (--from-dir)")
+    prp.add_argument("--executive-only", action="store_true",
+                     help="Hanya bagian ringkasan eksekutif")
+    prp.add_argument("--author", default="Keris", help="Nama penyusun laporan")
+    prp.add_argument("--no-cover", action="store_true", help="PDF tanpa cover page")
+    prp.add_argument("--no-toc", action="store_true", help="PDF tanpa daftar isi")
+
     return p.parse_args(argv)
 
 

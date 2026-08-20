@@ -161,6 +161,7 @@ never expose it publicly.
 | `scan --templates` | Template/rule engine: YAML detections (`.env`, `.git`, backups, phpinfo, Actuator, directory listing, Swagger) with AND/OR matchers |
 | `scan --mitre` | Annotate attack chains with MITRE ATT&CK techniques + tactic progression (needs `--chain`) |
 | `chain` | Offline attack-path analysis from a scan JSON: correlation + MITRE ATT&CK, Markdown/DOT output |
+| `report` | Professional reporting: templates (standard/owasp/pci/hipaa/ctf), finding templates, PDF (cover+TOC) / MD / HTML, batch from a scans directory |
 | `scan --pivot-auto` | After an SSRF/RCE is found, auto-pivot: detect internal interfaces, scan the internal network, try default creds (socks5/ssh/chisel; authorized only) |
 | `agent` | AI pentesting agent: plan + execute a goal step-by-step, with checkpoint/resume and a full Markdown report |
 | `farm` | Distributed scanning cluster: master/worker nodes share scan jobs over HTTP (register, claim, submit, unified report) |
@@ -268,6 +269,27 @@ keris farm status                                 # live queue/report
 - The master aggregates a single `farm-report.md` and reassigns jobs from
   failed workers automatically.
 - Auth via HMAC-signed tokens (`KERIS_FARM_SECRET` or `farm-secret.txt`).
+
+### Professional reporting (`report`)
+
+Turn any scan JSON into a polished, auditor-friendly deliverable:
+
+```bash
+keris report --from-scan scan.json --template owasp --format pdf --output report.pdf
+keris report --from-scan scan.json --template standard --format md --output report.md
+keris report --from-scan scan.json --executive-only --format md --output exec.md
+keris report --from-dir ./scans/ --out-dir ./reports/ --format md   # batch
+```
+
+- **Templates**: `standard`, `owasp` (OWASP Top 10 2021 mapping), `pci`,
+  `hipaa` (compliance control mapping per finding), and `ctf`
+  (walkthrough + flags + screenshots).
+- **Finding templates**: known vulns (SQLi, XSS, CSRF, SSRF, LFI, IDOR, ...)
+  auto-fill description, remediation, and references (CWE/OWASP/MITRE) when
+  the finding lacks them.
+- **PDF**: cover page, table of contents, severity-colored findings,
+  attack-path + MITRE sections, remediation plan, and appendix.
+- Zero new dependencies: Markdown/HTML are stdlib, PDF reuses reportlab.
 
 ### Enterprise suite (`enterprise`)
 
@@ -959,6 +981,7 @@ keris/
 - [x] **AI pentesting agent (`agent`)**
 - [x] **Distributed scanning cluster (`farm`)**
 - [x] **Enterprise suite (`enterprise`): RBAC, scheduler, alerts, integrations, web UI**
+- [x] **Professional reporting (`report`): templates, finding templates, PDF cover/TOC, batch**
 
 ## Legal note
 

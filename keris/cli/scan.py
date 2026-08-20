@@ -972,3 +972,96 @@ def _cmd_chain(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_report(args, cfg, overrides) -> int:
+    import glob as _glob
+
+    from keris.modules.reporting import REPORT_TEMPLATES, render_report_from_scan
+
+    if not getattr(args, "from_scan", "") and not getattr(args, "from_dir", ""):
+        error("report membutuhkan --from-scan <file.json> atau --from-dir <dir>")
+        return EXIT_ERROR
+
+    def _load_scan(path: str):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _write_one(path: str, scan_data, out_path: str) -> bool:
+        base_out = out_path.rsplit(".", 1)[0] if "." in os.path.basename(out_path) else out_path
+        ext = {"md": "md", "pdf": "pdf", "html": "html"}[getattr(args, "format", "md")]
+        target_out = f"{base_out}.{ext}" if "." not in os.path.basename(out_path) else out_path
+        try:
+            parent = os.path.dirname(target_out)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+        except OSError:
+            pass
+        if getattr(args, "format", "md") == "md":
+            md = render_report_from_scan(
+                scan_data, template=args.template,
+                options={"executive_only": getattr(args, "executive_only", False),
+                         "author": getattr(args, "author", "Keris")})
+            with open(target_out, "w", encoding="utf-8") as f:
+                f.write(md)
+        elif getattr(args, "format", "md") == "html":
+            from keris.report_html import generate_html_report
+
+            options = {"mode": "otomatis", "attack_paths": scan_data.get("attack_paths") or []}
+            mitre = scan_data.get("mitre") or {}
+            options["mitre_chains"] = mitre.get("chains") or []
+            if scan_data.get("executive_summary"):
+                options["executive_summary"] = scan_data["executive_summary"]
+            html = generate_html_report(scan_data.get("target", ""),
+                                        scan_data.get("recon", {}),
+                                        scan_data.get("discovery", {}),
+                                        scan_data.get("findings", []),
+                                        options)
+            with open(target_out, "w", encoding="utf-8") as f:
+                f.write(html)
+        else:
+            from keris.report_pdf import write_pdf_report
+            from keris.modules.reporting import REPORT_TEMPLATES
+
+            options = {
+                "mode": "otomatis",
+                "author": getattr(args, "author", "Keris"),
+                "template": args.template,
+                "cover": not getattr(args, "no_cover", False),
+                "toc": not getattr(args, "no_toc", False),
+                "attack_paths": scan_data.get("attack_paths") or [],
+            }
+            mitre = scan_data.get("mitre") or {}
+            options["mitre_chains"] = mitre.get("chains") or []
+            write_pdf_report(scan_data.get("recon", {}),
+                             scan_data.get("discovery", {}),
+                             scan_data.get("findings", []),
+                             target_out, scan_data.get("target", ""), options)
+        ok(f"Report: {target_out}")
+        return True
+
+    try:
+        if getattr(args, "from_dir", ""):
+            files = sorted(_glob.glob(os.path.join(args.from_dir, "*.json")))
+            if not files:
+                warn(f"Tidak ada file JSON di {args.from_dir}")
+                return EXIT_OK
+            out_dir = getattr(args, "out_dir", "") or args.from_dir
+            os.makedirs(out_dir, exist_ok=True)
+            for f in files:
+                scan_data = _load_scan(f)
+                name = os.path.splitext(os.path.basename(f))[0]
+                _write_one(f, scan_data, os.path.join(out_dir, name + "." +
+                                                      getattr(args, "format", "md")))
+            ok(f"Batch selesai: {len(files)} laporan di {out_dir}")
+            return EXIT_OK
+        if not getattr(args, "output", ""):
+            error("report --from-scan membutuhkan --output <file>")
+            return EXIT_ERROR
+        scan_data = _load_scan(args.from_scan)
+        if not _write_one(args.from_scan, scan_data, args.output):
+            return EXIT_ERROR
+        return EXIT_OK
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        error(f"Gagal membuat report: {e}")
+        return EXIT_ERROR
+
+
