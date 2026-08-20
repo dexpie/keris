@@ -370,6 +370,16 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pjs.add_argument("--max-assets", type=int, default=15, help="Maksimum asset JS dianalisis")
     pjs.add_argument("--json-output", help="File output JSON")
 
+    # sast (client-side static analysis + SBOM)
+    psast = sub.add_parser("sast", parents=[common],
+                           help="SAST client-side: analisis source/JS bundle, CVE DB dependency, SBOM CycloneDX")
+    psast.add_argument("--dir", default="", help="Direktori source untuk analisis statis offline")
+    psast.add_argument("--file", default="", help="File source tunggal untuk analisis statis")
+    psast.add_argument("--sbom-out", default="", help="File output SBOM JSON (CycloneDX)")
+    psast.add_argument("--json-output", help="File output JSON temuan")
+    psast.add_argument("--max-assets", type=int, default=15,
+                       help="Maksimum asset JS dianalisis saat target adalah URL (default: 15)")
+
     # sensitive (paparan data sensitif)
     psen = sub.add_parser("sensitive", parents=[common],
                           help="Scan paparan data sensitif (kredensial/PII/kartu kredit)")

@@ -135,6 +135,7 @@ never expose it publicly.
 | `crawl` / `graphql` / `smuggling` / `takeover` | Attack-surface map, GraphQL testing, request smuggling, subdomain takeover |
 | `cachepoison` / `hostheader` / `websocket` | Web cache poisoning, host header injection (incl. password-reset poisoning), WebSocket auth & Origin checks |
 | `toolbox` | Offline utility kit: encode/decode, hashing + crack, payload generator (SQLi/XSS/LFI/SSRF/cmd) with mutations, reverse shells, wordlists, port scan, DNS check, JWT decode/analyze, gzip/zlib |
+| `sast` | Client-side static analysis: source/JS bundle sinks + secrets, dependency CVE DB, CycloneDX SBOM |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |
 | `project` | Self-audit of a local codebase; JSON output friendly to AI coding agents |
@@ -441,6 +442,27 @@ keris toolbox --tool list                                  # all tools
 
 Payloads cover SQLi, XSS, LFI/path traversal, SSRF, and command injection;
 `--mutation` expands a payload with encoding/case/comment variants.
+
+### Client-side SAST (`sast`)
+
+Static analysis over source you can read (downloaded bundles or a local repo),
+no live attack:
+
+```bash
+keris sast --dir ./src --json-output sast.json --sbom-out sbom.json
+keris sast --file app.py
+keris sast https://example.com --max-assets 20   # analyze JS bundles live
+```
+
+- **Source analyzer**: detects eval/Function(), DOM XSS sinks, shell command
+  execution, raw SQL, weak hashes (MD5/SHA1), insecure crypto (DES), path
+  traversal, plaintext HTTP, disabled TLS verification, hardcoded credentials,
+  unsafe deserialization, and XML/XXE-prone parsing — each with CWE.
+- **Dependency CVE DB**: offline database of 40+ packages (JS + Python +
+  server) maps detected `package.json`/`requirements.txt` versions to known
+  CVEs (lodash, axios, next, express, flask, django, requests, ...).
+- **SBOM**: emits a CycloneDX 1.4 JSON inventory (name, version, purl) plus a
+  markdown table in the console.
 
 ### Credential hunting (`hunt`)
 
@@ -1018,6 +1040,7 @@ keris/
 - [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
 - [x] **Advanced hunt: 50+ secret patterns, `--deep` paths, `--types` filter, `--from-scan`**
 - [x] **Offline toolbox (`toolbox`): encode/decode, hash/crack, payloads, shells, wordlists, ports, dns, jwt**
+- [x] **Client-side SAST (`sast`): source analyzer, dependency CVE DB, CycloneDX SBOM**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**

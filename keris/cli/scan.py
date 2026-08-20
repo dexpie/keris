@@ -481,6 +481,85 @@ def _cmd_jsanalysis(args, cfg, overrides) -> int:
     return _exit_code([x.to_dict() for x in all_findings], getattr(args, "exit_on", "high"))
 
 
+def _cmd_sast(args, cfg, overrides) -> int:
+    from keris.modules.sast import (analyze_directory, analyze_source,
+                                    build_sbom, check_dependencies,
+                                    extract_dependencies, sbom_markdown)
+    from keris.modules.jsanalysis import analyze_js
+    from keris.modules.jsdeps import check_js_dependencies
+
+    # mode 1: analisis statis offline direktori / file
+    src_dir = getattr(args, "dir", "") or ""
+    src_file = getattr(args, "file", "") or ""
+    if src_file:
+        if not os.path.isfile(src_file):
+            error(f"File tidak ditemukan: {src_file}")
+            return EXIT_ERROR
+        with open(src_file, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read(1000000)
+        findings = analyze_source(text, os.path.basename(src_file), src_file)
+        packages = extract_dependencies(text, os.path.basename(src_file))
+        findings.extend(check_dependencies(packages))
+        sbom = build_sbom(packages, target=src_file)
+        ok(f"SAST file: 1 file, {len(findings)} temuan, "
+           f"{len(packages)} dependency")
+    elif src_dir:
+        target = src_dir
+        res = analyze_directory(target, target=target,
+                                json_output=getattr(args, "json_output", "") or "")
+        findings = res["findings"]
+        ok(f"SAST offline: {res['files_scanned']} file, "
+           f"{len(findings)} temuan, {res['dependency_count']} dependency")
+        sbom = res["sbom"]
+    else:
+        # mode 2: analisis bundle JS target URL
+        targets = _resolve_targets(args)
+        all_findings = []
+        for target in targets:
+            base = normalize_url(target)
+            client = _make_client(args, cfg, overrides, base)
+            try:
+                res = analyze_js(base, client, max_assets=args.max_assets)
+                all_findings.extend(res["findings"])
+                # dependency CVE dari bundle JS
+                js_texts = []
+                for url in res["js_scanned"]:
+                    try:
+                        r = client.get(url, timeout=15)
+                        if r.status_code == 200 and r.text:
+                            js_texts.append(r.text)
+                    except Exception:
+                        continue
+                all_findings.extend(check_js_dependencies(base, js_texts, client=client))
+            finally:
+                client.close()
+        if getattr(args, "json_output", ""):
+            _ensure_parent(args.json_output)
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"targets": targets,
+                           "findings": [x.to_dict() for x in all_findings]},
+                          f, indent=2, default=str)
+            ok(f"JSON output: {args.json_output}")
+        return _exit_code([x.to_dict() for x in all_findings],
+                          getattr(args, "exit_on", "high"))
+
+    if src_file:
+        if getattr(args, "json_output", ""):
+            _ensure_parent(args.json_output)
+            with open(args.json_output, "w", encoding="utf-8") as f:
+                json.dump({"findings": [x.to_dict() for x in findings]},
+                          f, indent=2, default=str)
+            ok(f"JSON output: {args.json_output}")
+    if getattr(args, "sbom_out", ""):
+        _ensure_parent(args.sbom_out)
+        with open(args.sbom_out, "w", encoding="utf-8") as f:
+            json.dump(sbom, f, indent=2, default=str)
+        ok(f"SBOM: {args.sbom_out}")
+    print(sbom_markdown(sbom))
+    return _exit_code([f.to_dict() for f in findings],
+                      getattr(args, "exit_on", "high"))
+
+
 def _cmd_websocket(args, cfg, overrides) -> int:
     from keris.modules.websocket import check_websocket
 
