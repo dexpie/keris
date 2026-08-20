@@ -92,10 +92,21 @@ def _cmd_credcheck(args, cfg, overrides) -> int:
 def _cmd_hunt(args, cfg, overrides) -> int:
     from keris.modules.hunt import run_hunt
 
+    if getattr(args, "list_types", False):
+        from keris.modules.hunt import SECRET_TYPES
+        ok("Jenis secret yang didukung (%d):" % len(SECRET_TYPES))
+        for t in SECRET_TYPES:
+            print(f"  {t}")
+        return EXIT_OK
+
     if getattr(args, "verify", False):
         from keris.core.logger import brutal_warning
 
         brutal_warning("HUNT --VERIFY")
+
+    types = None
+    if getattr(args, "types", ""):
+        types = [t.strip() for t in args.types.split(",") if t.strip()]
 
     targets = _resolve_targets(args)
     all_findings = []
@@ -103,8 +114,10 @@ def _cmd_hunt(args, cfg, overrides) -> int:
         base = normalize_url(target)
         client = _make_client(args, cfg, overrides, base)
         try:
-            all_findings.extend(run_hunt(base, client, verify=args.verify,
-                                         extra_urls=args.asset))
+            all_findings.extend(run_hunt(
+                base, client, verify=args.verify,
+                extra_urls=args.asset, deep=getattr(args, "deep", False),
+                types=types, from_scan=getattr(args, "from_scan", None)))
         finally:
             client.close()
     if args.json_output:

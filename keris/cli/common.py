@@ -455,8 +455,17 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     phu.add_argument("--json-output", help="File output JSON")
     phu.add_argument("--verify", action="store_true",
                      help="Verifikasi AWS key yang ditemukan terhadap endpoint publik AWS")
+    phu.add_argument("--deep", action="store_true",
+                     help="Periksa lokasi dalam (backup/old/tmp/dll) untuk file sensitif")
+    phu.add_argument("--types", default="",
+                     help="Filter jenis secret (koma): aws_access_key_id,github_token,private_key,... "
+                          "(default: semua). Lihat daftar lengkap via --list-types")
+    phu.add_argument("--list-types", action="store_true",
+                     help="Tampilkan semua jenis secret yang didukung lalu keluar")
     phu.add_argument("--asset", action="append", default=[],
                      help="URL aset tambahan untuk scan secret (bisa diulang)")
+    phu.add_argument("--from-scan", default=None,
+                     help="File JSON hasil scan/hunt: endpoint-nya ikut di-scan secret")
 
     # credcheck (validate leaked credentials - authorized only)
     pcc = sub.add_parser("credcheck", parents=[common],

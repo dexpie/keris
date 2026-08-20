@@ -425,6 +425,8 @@ full scan with `--hunt`:
 
 ```bash
 keris hunt https://example.com --json-output hunt.json
+keris hunt https://example.com --deep --types aws_access_key_id,github_token
+keris hunt https://example.com --from-scan scan.json --verify
 keris scan https://example.com --hunt
 ```
 
@@ -435,10 +437,17 @@ What it checks:
   disclosure). A dumpable `.git` means the whole source tree may be recoverable
   offline, flagged CRITICAL. `/.git/config` leaks the remote repo URL.
 - **Config & backup files**: `.env`, `.env.*`, `wp-config.php`, `config.*`,
-  `*.bak`, `dump.sql`, and ~25 more, with a secret check on the contents.
-- **Cloud & app secrets**: AWS access keys, Google API keys / OAuth client
-  secrets, GitHub and Slack tokens, OpenAI keys, plus generic password / API
-  key patterns across pages and JS bundles.
+  `*.bak`, `dump.sql`, and ~70 more, with a secret check on the contents.
+  `--deep` additionally probes hidden locations (`backup/`, `old/`, `tmp/`,
+  `logs/`, ...) for leaked snapshot/config files.
+- **Cloud & app secrets**: 50+ patterns covering AWS access keys, Google/Azure,
+  GitHub/GitLab, Slack, OpenAI/Anthropic, Stripe/PayPal/Razorpay, Twilio,
+  SendGrid/Mailgun, Heroku/DigitalOcean/Shopify, JWT/Bearer, private keys
+  (RSA/SSH/ETH), Firebase, Telegram, Discord, and generic password / API key
+  patterns across pages and JS bundles. Filter with `--types` (see
+  `--list-types` for the full catalog).
+- **`--from-scan`**: reuses every endpoint from a previous scan/hunt JSON so you
+  can re-hunt a larger corpus without re-crawling.
 - **`--verify`**: sends a single metadata request to AWS
   (`GetAccessKeyLastUsed`) to check whether a discovered AWS key is live.
 
@@ -983,6 +992,7 @@ keris/
 - [x] **Continuous monitoring (`watch`)**
 - [x] **Interactive terminal UI (`tui`)**
 - [x] **Credential hunting (`hunt`): .git dump, .env/backup, cloud secrets**
+- [x] **Advanced hunt: 50+ secret patterns, `--deep` paths, `--types` filter, `--from-scan`**
 - [x] **Multi-vector DoS (`dos --hammer`)**
 - [x] **One-flag everything (`scan --pwn`)**
 - [x] **Live credential validation (`credcheck`)**
