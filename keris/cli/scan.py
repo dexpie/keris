@@ -770,29 +770,46 @@ def _cmd_backdoor(args, cfg, overrides) -> int:
 
 
 def _cmd_agent(args, cfg, overrides) -> int:
-    from keris.agent import AGENT_REPORT, run_agent
+    from keris.agents import run_agent_squad
     from keris.core.logger import brutal_warning
 
     brutal_warning("AI AGENT")
-    if not args.goal:
-        error("Agent membutuhkan --goal, mis. --goal \"Ambil alih server example.com\"")
-        return EXIT_ERROR
+    goal = getattr(args, "goal", "full-pentest") or "full-pentest"
     targets = _resolve_targets(args)
     target = normalize_url(targets[0]) if targets else ""
     if not target:
         error("Agent membutuhkan target URL.")
         return EXIT_ERROR
-    summary = run_agent(
-        args.goal, target,
-        max_steps=getattr(args, "max_steps", 10),
-        verbose=bool(getattr(args, "verbose", False)),
-        authorized=bool(getattr(args, "authorized", False)),
-        resume=bool(getattr(args, "resume", False)),
-        state_file=getattr(args, "state_file", "agent-state.json"),
-        report_file=getattr(args, "report", AGENT_REPORT),
-    )
-    ok(f"Agent selesai: {summary['steps_executed']} langkah, "
-       f"{summary['successes']} berhasil, {summary['total_findings']} temuan")
+
+    if goal == "custom":
+        # mode single-agent lama (goal teks bebas)
+        from keris.agent import AGENT_REPORT, run_agent
+        custom_goal = getattr(args, "custom_goal", "") or target
+        if not custom_goal:
+            error("--goal custom membutuhkan --custom-goal")
+            return EXIT_ERROR
+        summary = run_agent(
+            custom_goal, target,
+            max_steps=getattr(args, "max_steps", 10),
+            verbose=bool(getattr(args, "verbose", False)),
+            authorized=bool(getattr(args, "authorized", False)),
+            resume=bool(getattr(args, "resume", False)),
+            state_file=getattr(args, "state_file", "agent-state.json"),
+            report_file=getattr(args, "report", AGENT_REPORT),
+        )
+    else:
+        summary = run_agent_squad(
+            target, goal=goal,
+            authorized=bool(getattr(args, "authorized", False)),
+            verbose=bool(getattr(args, "verbose", False)),
+            resume=bool(getattr(args, "resume", False)),
+            state_file=getattr(args, "state_file", "agent-state.json"),
+            report_file=getattr(args, "report", "agent-report.md"),
+            findings_file=getattr(args, "findings", "agent-findings.json"),
+            max_workers=getattr(args, "workers", 2),
+        )
+    ok(f"Agent selesai: {summary.get('validated_findings', 0)} temuan "
+       f"({summary.get('exploited_findings', 0)} dieksploitasi)")
     if getattr(args, "json_output", None):
         _ensure_parent(args.json_output)
         with open(args.json_output, "w", encoding="utf-8") as f:

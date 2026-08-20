@@ -239,19 +239,32 @@ keris scan https://example.com --pivot-auto --authorized
 
 ### AI pentesting agent (`agent`)
 
-An autonomous agent that plans and executes a security goal step by step,
-keeping full state so it can resume later:
+Two modes share the same command:
+
+**Multi-agent squad** (default, zero-dependency framework in `keris/agents/`):
+a coordinator runs a pipeline of specialist agents over a thread-safe
+`SharedMemory`, so each phase feeds the next:
 
 ```bash
-keris agent "Get a shell on the server" https://example.com --authorized --verbose
-keris agent --goal "..." --resume              # continue from a checkpoint
+keris agent https://example.com --goal full-pentest --authorized
+keris agent https://example.com --goal recon
+keris agent https://example.com --goal exploit --authorized --resume
+keris agent https://example.com --goal custom --custom-goal "Get a shell on the server"
 ```
 
-- Planner is LLM-driven (`KERIS_LLM_API_KEY`, OpenAI-compatible) with a
-  rule-based fallback when no key is set.
-- Writes `agent-report.md` (full log of every step) and `agent-state.json`
-  (checkpoint for resume).
-- Without `--authorized` the agent only runs non-destructive steps.
+- **ReconAgent** fingerprints the target (DNS, headers, stack, endpoints).
+- **ScannerAgent** probes every discovered endpoint for vulns.
+- **ValidatorAgent** dedupes, filters false positives, and ranks by severity.
+- **ExploiterAgent** confirms exploitation (only with `--authorized`).
+- **ReporterAgent** writes `agent-report.md`, `agent-findings.json`, and
+  `agent-state.json` (checkpoint, resumes with `--resume`).
+- Phases run sequentially; `--workers` controls parallelism. Custom checks can
+  be injected via hooks (used by tests, no network needed).
+
+**Legacy single agent** (`--goal custom --custom-goal "..."`): an LLM planner
+(`KERIS_LLM_API_KEY`, OpenAI-compatible) breaks a free-text goal into steps,
+executes `keris` modules, evaluates results, and resumes from checkpoint.
+Without a key it falls back to a rule-based plan.
 
 ### Distributed scanning farm (`farm`)
 
@@ -982,6 +995,7 @@ keris/
 - [x] **Distributed scanning cluster (`farm`)**
 - [x] **Enterprise suite (`enterprise`): RBAC, scheduler, alerts, integrations, web UI**
 - [x] **Professional reporting (`report`): templates, finding templates, PDF cover/TOC, batch**
+- [x] **Multi-agent framework (`agent`): orchestrator + 5 specialist agents, shared memory, parallel**
 
 ## Legal note
 

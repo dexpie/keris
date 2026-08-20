@@ -674,8 +674,11 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # agent (AI pentesting agent)
     pag = sub.add_parser("agent", parents=[common],
                          help="AI Pentesting Agent: pecah goal jadi langkah, jalankan modul keris otomatis (LLM: KERIS_LLM_API_KEY)")
-    pag.add_argument("--goal", default="",
-                     help="Goal agent, mis. \"Dapatkan akses shell ke server\"")
+    pag.add_argument("--goal", default="full-pentest",
+                     choices=["full-pentest", "recon", "exploit", "custom"],
+                     help="Mode multi-agent: full-pentest (default), recon, exploit, atau custom (goal teks)")
+    pag.add_argument("--custom-goal", default="",
+                     help="Goal teks bebas saat --goal custom, mis. \"Dapatkan akses shell ke server\"")
     pag.add_argument("--max-steps", type=int, default=10,
                      help="Batas maksimum langkah yang dieksekusi (default: 10)")
     pag.add_argument("--verbose", action="store_true",
@@ -686,6 +689,10 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                      help="File checkpoint state (default: agent-state.json)")
     pag.add_argument("--report", default="agent-report.md",
                      help="File laporan agent (default: agent-report.md)")
+    pag.add_argument("--findings", default="agent-findings.json",
+                     help="File output temuan (default: agent-findings.json)")
+    pag.add_argument("--workers", type=int, default=2,
+                     help="Jumlah worker paralel multi-agent (default: 2)")
     pag.add_argument("--json-output", help="File output JSON ringkasan agent")
 
     # farm (distributed scanning cluster)
