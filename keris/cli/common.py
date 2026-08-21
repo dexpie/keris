@@ -58,6 +58,8 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     common.add_argument("target", nargs="?", help="URL target, mis. https://example.com")
     common.add_argument("--targets", help="File berisi daftar target (satu per baris)")
     common.add_argument("--proxy", help="Proxy HTTP (mis. http://127.0.0.1:8080)")
+    common.add_argument("--proxy-file", dest="proxy_file",
+                        help="File daftar proxy (satu per baris) untuk rotasi round-robin")
     common.add_argument("--timeout", type=float, help="Timeout request (detik)")
     common.add_argument("--retries", type=int, help="Jumlah retry koneksi")
     common.add_argument("--delay", type=float, help="Jeda antar request (detik)")
@@ -131,6 +133,9 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                     help="Scan beberapa target secara paralel (butuh --targets, mempercepat batch besar)")
     ps.add_argument("--exit-on", choices=["none", "high", "medium", "low"], default="high",
                     help="Severity minimum yang menyebabkan exit code 1 (default: high)")
+    ps.add_argument("--baseline", dest="baseline", default="",
+                    help="File baseline (dari `keris baseline create`): temuan yang sudah "
+                         "dikenal ditandai baseline=true dan tidak memicu exit code 1")
     ps.add_argument("--min-confidence", type=float, default=0.0,
                     help="Hanya tampilkan temuan dengan confidence >= nilai ini (0..1, default 0 = semua)")
     # --- serangan aktif (khusus berizin, wajib --authorized) ---
@@ -213,6 +218,19 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     # init (buat contoh config)
     pi = sub.add_parser("init", help="Buat contoh file konfigurasi keris.json")
     pi.add_argument("-o", "--output", default="keris.json.example", help="File output")
+
+    # baseline (accepted-risk / false-positive management)
+    pbl = sub.add_parser("baseline", parents=[common],
+                         help="Kelola baseline temuan: `create` untuk membuat dari hasil scan")
+    pbl.add_argument("baseline_cmd", choices=["create", "show"],
+                     help="Aksi baseline (create: buat dari scan JSON)")
+    pbl.add_argument("--from-scan", required=True,
+                     help="File hasil scan JSON sumber baseline")
+    pbl.add_argument("-o", "--output", default="keris-baseline.json",
+                     help="File output baseline (default: keris-baseline.json)")
+    pbl.add_argument("--min-severity", default="INFO",
+                     choices=["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                     help="Hanya temuan >= severity ini yang masuk baseline (default: semua)")
 
     # plugins (daftar & jalankan plugin)
     pl = sub.add_parser("plugins", parents=[common], help="Jalankan plugin saja terhadap target")
@@ -686,8 +704,6 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
                      help="Metode auth (default: auto)")
     psp.add_argument("--spray-delay", type=float, default=0.5, dest="spray_delay",
                      help="Jeda antar percobaan (detik, untuk hindari rate-limit)")
-    psp.add_argument("--proxy-file", default=None,
-                     help="File proxy (satu per baris, untuk rotasi)")
     psp.add_argument("--authorized", action="store_true",
                      help="KONFIRMASI izin tertulis untuk serangan aktif")
     psp.add_argument("--json-output", help="File output JSON")
@@ -937,11 +953,19 @@ def _make_client(args, cfg: KerisConfig, overrides: dict, base: str = "") -> Ker
     pwd = overrides.get("password", cfg.password)
     if uname and pwd:
         basic = (uname, pwd)
+    proxies = []
+    pf = getattr(args, "proxy_file", None)
+    if pf and os.path.exists(pf):
+        with open(pf, "r", encoding="utf-8-sig") as f:
+            proxies = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+        if proxies:
+            info(f"Rotasi proxy aktif: {len(proxies)} proxy")
     client = KerisHTTP(
         token=token,
         cookie=cookie,
         basic_auth=basic,
         proxy=overrides.get("proxy", cfg.proxy),
+        proxies=proxies or None,
         timeout=overrides.get("timeout", cfg.timeout),
         retries=overrides.get("retries", cfg.retries),
         insecure=overrides.get("insecure", cfg.insecure),

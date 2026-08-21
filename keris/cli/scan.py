@@ -20,6 +20,29 @@ from keris.report_html import write_html_report
 
 from keris.cli.common import *  # noqa: F401,F403
 
+
+def _cmd_baseline(args, cfg, overrides) -> int:
+    """Handler `keris baseline`: buat/tampilkan baseline temuan dikenal."""
+    from keris.modules.baseline import create_from_scan, load_baseline
+
+    if args.baseline_cmd == "show":
+        keys = sorted(load_baseline(args.from_scan))
+        info(f"Baseline file    : {args.from_scan}")
+        info(f"Jumlah key       : {len(keys)}")
+        for k in keys[:20]:
+            print(f"  {k}")
+        if len(keys) > 20:
+            print(f"  ... dan {len(keys) - 20} lainnya")
+        return EXIT_OK
+    payload = create_from_scan(args.from_scan, min_severity=args.min_severity)
+    out = args.output or "keris-baseline.json"
+    _ensure_parent(out)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    ok(f"Baseline ditulis: {out} ({payload['count']} temuan dikenal)")
+    return EXIT_OK
+
+
 def _cmd_scan(args, cfg, overrides) -> int:
     targets = _resolve_targets(args)
     all_results = []
@@ -35,6 +58,19 @@ def _cmd_scan(args, cfg, overrides) -> int:
             return base, None, EXIT_ERROR
         finally:
             client.close()
+        # baseline: tandai temuan yang sudah dikenal; abaikan untuk exit code
+        bl_path = getattr(args, "baseline", "") or ""
+        if bl_path:
+            from keris.modules.baseline import apply_baseline, load_baseline
+
+            try:
+                keys = load_baseline(bl_path)
+                result["findings"], marked = apply_baseline(result["findings"], keys)
+                if marked:
+                    warn(f"Baseline: {marked} temuan dikenal ditandai (tidak memicu exit 1)")
+            except (OSError, ValueError) as e:
+                error(f"Baseline gagal dimuat ({bl_path}): {e}")
+                return base, None, EXIT_ERROR
         options = {"mode": "otomatis dengan Keris", "targets_file": bool(args.targets)}
         mitre_chains = (result.get("mitre") or {}).get("chains")
         if mitre_chains:
@@ -73,7 +109,8 @@ def _cmd_scan(args, cfg, overrides) -> int:
                 ok(f"SARIF output: {_suffixed(args.sarif_output, slug)}")
         else:
             _write_outputs(base, result, args, options, cfg)
-        return base, result, _exit_code(result["findings"], getattr(args, "exit_on", "high"))
+        exit_findings = [f for f in result["findings"] if not f.get("baseline")]
+        return base, result, _exit_code(exit_findings, getattr(args, "exit_on", "high"))
 
     if getattr(args, "parallel", False) and len(targets) > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed

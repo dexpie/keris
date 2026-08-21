@@ -1,7 +1,7 @@
 """Klien HTTP dengan dukungan auth (cookie, token, basic), retry, proxy, dan backoff adaptif."""
 
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import threading
 
 import requests
@@ -20,6 +20,7 @@ class KerisHTTP:
         cookie: Optional[str] = None,
         basic_auth: Optional[tuple] = None,
         proxy: Optional[str] = None,
+        proxies: Optional[List[str]] = None,
         timeout: float = 20.0,
         retries: int = 1,
         user_agent: Optional[str] = None,
@@ -43,17 +44,22 @@ class KerisHTTP:
         self._last_request_time = 0.0
         self._backoff = 0.0
         self._consecutive_blocks = 0
+        # rotasi proxy: round-robin per request; pindah proxy saat diblokir
+        self._proxies = [p.strip() for p in (proxies or []) if p and p.strip()]
+        if proxy and proxy not in self._proxies:
+            self._proxies.insert(0, proxy)
+        self._proxy_idx = 0
 
-        if proxy:
-            self.session.proxies = {"http": proxy, "https": proxy}
-            # dukungan SOCKS5 (mis. Tor: socks5h://127.0.0.1:9050)
-            if proxy.lower().startswith("socks"):
+        for p in self._proxies:
+            if p.lower().startswith("socks"):
                 try:
                     import socks  # noqa: F401
                 except ImportError:
                     raise RuntimeError(
                         "Proxy SOCKS membutuhkan PySocks. Install: pip install PySocks"
                     )
+        if self._proxies and not any(p.lower().startswith("socks") for p in self._proxies):
+            pass  # proxy HTTP tidak butuh dependensi tambahan
 
         if insecure:
             import urllib3
@@ -93,6 +99,22 @@ class KerisHTTP:
             h["Cookie"] = self.cookie_header
         return h
 
+    def _next_proxy_dict(self) -> Optional[Dict[str, str]]:
+        """Round-robin proxy; None bila tidak ada proxy dikonfigurasi."""
+        if not self._proxies:
+            return None
+        with self._rate_lock:
+            p = self._proxies[self._proxy_idx % len(self._proxies)]
+            self._proxy_idx += 1
+        return {"http": p, "https": p}
+
+    def _rotate_proxy(self) -> None:
+        """Pindah ke proxy berikutnya (dipanggil saat diblokir/rate-limit)."""
+        if len(self._proxies) > 1:
+            with self._rate_lock:
+                self._proxy_idx = (self._proxy_idx + 1) % len(self._proxies)
+                debug(f"Rotasi proxy -> #{self._proxy_idx}")
+
     def request(
         self,
         method: str,
@@ -114,6 +136,9 @@ class KerisHTTP:
         kwargs.setdefault("timeout", self.timeout)
         kwargs.setdefault("verify", not self.insecure)
         kwargs.setdefault("auth", self.basic_auth)
+        proxy_dict = self._next_proxy_dict()
+        if proxy_dict:
+            kwargs.setdefault("proxies", proxy_dict)
         try:
             # throttle untuk menghindari overload / deteksi rate limit
             wait = self.delay
@@ -155,6 +180,8 @@ class KerisHTTP:
                 # reset bertahap
                 if self._consecutive_blocks == 0:
                     self._backoff = max(0.0, self._backoff - 1.0)
+        if blocked:
+            self._rotate_proxy()
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
         return self.request("GET", url, **kwargs)
