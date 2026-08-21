@@ -456,6 +456,14 @@ def _parse_args(argv: List[str]) -> argparse.Namespace:
     pdb.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
     pdb.add_argument("--quiet", action="store_true", help="Minimal output")
 
+    # portfolio (agregasi risk score banyak target)
+    ppo = sub.add_parser("portfolio", help="Portfolio risk: peringkat target, grade gabungan, temuan teratas dari banyak scan JSON")
+    ppo.add_argument("json_files", nargs="+", help="File hasil scan (JSON output Keris)")
+    ppo.add_argument("-o", "--output", help="File laporan markdown portfolio")
+    ppo.add_argument("--json-output", help="File output JSON agregat")
+    ppo.add_argument("--no-color", action="store_true", help="Nonaktifkan warna output")
+    ppo.add_argument("--quiet", action="store_true", help="Minimal output")
+
     # dos (app-layer resilience tester, HANYA dengan izin)
     pdo = sub.add_parser("dos", parents=[common],
                          help="Uji ketahanan app-layer (slowloris/slow POST/flood). Wajib --yes dan izin tertulis!")

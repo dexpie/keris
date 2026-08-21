@@ -177,6 +177,7 @@ never expose it publicly.
 | `http` | HTTP mass-scan: status, title, server, tech, redirect dari banyak URL (file --targets) |
 | `autopilot` | Run a full pipeline automatically: recon → discover → fuzz → hunt → scan + report, no prompts |
 | `baseline` | Accepted-risk / FP management: `create` dari hasil scan, lalu `scan --baseline` menandai temuan dikenal & menjaga exit code CI tetap hijau |
+| `portfolio` | Portfolio risk: peringkat target terburuk, grade gabungan, temuan teratas & jenis masalah paling umum dari banyak scan JSON |
 | `enterprise` | Enterprise microservices: orgs/tenants, RBAC matrix, scan CRUD API + worker/scheduler, docker-compose |
 | `jsanalysis` / `sensitive` | DOM XSS sinks + secrets in JS bundles; leaked credentials/PII/cards in responses |
 | `bruteforce` / `platforms` | Weak login (form/basic), platform-specific checks (WordPress, Laravel, ...) |

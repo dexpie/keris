@@ -59,3 +59,37 @@ def _cmd_dashboard(args, cfg, overrides) -> int:
     return EXIT_OK
 
 
+def _cmd_portfolio(args, cfg, overrides) -> int:
+    """Handler `keris portfolio`: agregasi risk score banyak target."""
+    from keris.modules.portfolio import build_portfolio, render_markdown
+
+    paths = [p for p in args.json_files if os.path.exists(p)]
+    if len(paths) < len(args.json_files):
+        for jf in args.json_files:
+            if not os.path.exists(jf):
+                warn(f"File tidak ditemukan: {jf}")
+    if not paths:
+        error("Tidak ada file scan valid untuk portfolio")
+        return EXIT_ERROR
+    agg = build_portfolio(paths)
+    o = agg["overall"]
+    info(f"=== PORTFOLIO: {agg['num_targets']} target ===")
+    info(f"Grade gabungan : {o['grade']} ({o['score']}/100)")
+    info(f"Rekomendasi    : {o['recommendation']}")
+    for t in agg["targets"][:10]:
+        info(f"  [{t['grade']}] {t['score']:>5}  {t['target']}  "
+             f"(C:{t['counts'].get('CRITICAL', 0)} H:{t['counts'].get('HIGH', 0)} "
+             f"M:{t['counts'].get('MEDIUM', 0)})")
+    if args.output:
+        _ensure_parent(args.output)
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(render_markdown(agg))
+        ok(f"Laporan portfolio: {args.output}")
+    if getattr(args, "json_output", None):
+        _ensure_parent(args.json_output)
+        with open(args.json_output, "w", encoding="utf-8") as f:
+            json.dump(agg, f, indent=2, default=str)
+        ok(f"JSON output: {args.json_output}")
+    return EXIT_OK
+
+

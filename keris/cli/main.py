@@ -19,7 +19,7 @@ from keris.cli.recon import (
     _cmd_ports, _cmd_project, _cmd_recon, _cmd_subdomain, _cmd_tls, _cmd_waf,
     _cmd_wayback,
 )
-from keris.cli.report import _cmd_dashboard, _cmd_export
+from keris.cli.report import _cmd_dashboard, _cmd_export, _cmd_portfolio
 from keris.cli.scan import (
     _cmd_agent, _cmd_backdoor, _cmd_baseline, _cmd_bruteforce, _cmd_cachepoison,
     _cmd_chain, _cmd_crawl, _cmd_discover, _cmd_enterprise, _cmd_farm, _cmd_fuzz,
@@ -135,6 +135,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _cmd_export(args, cfg, overrides)
         if args.command == "dashboard":
             return _cmd_dashboard(args, cfg, overrides)
+        if args.command == "portfolio":
+            return _cmd_portfolio(args, cfg, overrides)
         if args.command == "dos":
             return _cmd_dos(args, cfg, overrides)
         if args.command == "serve":
